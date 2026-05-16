@@ -260,17 +260,17 @@
                     <div class="form-divider upi-divider" id="upi-divider"></div>
 
                     <div class="form-section-group upi-group" id="upi-fields">
-                        <p class="form-section-label">UPI Transaction Signals</p>
+                        <p class="form-section-label">UPI Transaction Details</p>
                         <div class="alert alert-info" role="alert">
-                            <strong>UPI tier:</strong> These fields describe monthly cashflow, transaction reliability,
-                            volatility, and counterparty breadth for the standalone UPI model.
+                            <strong>UPI tier:</strong> Enter only direct monthly transaction facts. The system calculates ratios
+                            and other derived values automatically.
                         </div>
 
                         <div class="form-grid">
                             {% for field in upi_section.fields %}
                             {% set sample_value = upi_sample.get(upi_section.name, {}).get(field.name) %}
                             <div class="input-field">
-                                <label for="{{ field.name }}">{{ field.name }}</label>
+                                <label for="{{ field.name }}">{{ field.label or field.name }}</label>
                                 <input
                                     id="{{ field.name }}"
                                     name="{{ field.name }}"
@@ -281,6 +281,9 @@
                                     value="{{ sample_value if sample_value is not none else '' }}"
                                     placeholder="{{ sample_value if sample_value is not none else '' }}"
                                 >
+                                {% if field.hint %}
+                                <p class="field-hint">{{ field.hint }}</p>
+                                {% endif %}
                             </div>
                             {% endfor %}
                         </div>

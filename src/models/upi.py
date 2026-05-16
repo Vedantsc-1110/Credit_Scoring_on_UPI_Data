@@ -44,7 +44,7 @@ if __name__ == "__main__":
     sys.modules["src.models.upi"] = sys.modules[__name__]
 
 UPI_DATASET_PATH = os.path.join("data", "raw", "final_base_with_upi_corrected.csv")
-UPI_MODEL_VERSION = "upi_v1.0.0"
+UPI_MODEL_VERSION = "upi_v1.1.0"
 UPI_REPORT_FILENAME = "upi_training_report.json"
 UPI_BUILDER_FILENAME = "upi_feature_builder.joblib"
 UPI_MODEL_FILENAME = "upi_model.joblib"
@@ -103,6 +103,29 @@ UPI_TRANSACTION_COLUMNS = (
     "active_days",
     "peak_txn_day_count",
 )
+UPI_HIGH_RISK_PROXY_COLUMNS = (
+    "balance_instability_score",
+    "failed_due_to_low_balance",
+    "failed_txn_count",
+    "outflow_volatility",
+    "inflow_volatility",
+    "txn_value_std",
+    "success_txn_count",
+    "peak_txn_day_count",
+)
+UPI_STABLE_TRANSACTION_COLUMNS = (
+    "monthly_inflow",
+    "monthly_outflow",
+    "monthly_txn_count",
+    "avg_txn_value",
+    "median_txn_value",
+    "inflow_txn_count",
+    "outflow_txn_count",
+    "weekday_txn_ratio",
+    "weekend_txn_ratio",
+    "distinct_counterparties",
+    "active_days",
+)
 ENGINEERED_UPI_COLUMNS = (
     "AGE_YEARS",
     "EMPLOYED_YEARS",
@@ -135,6 +158,7 @@ class UpiFeatureBuilder:
     """Frozen transformer for the UPI model tier."""
 
     raw_columns_: list[str] = field(default_factory=list)
+    excluded_raw_columns_: list[str] = field(default_factory=list)
     pre_model_columns_: list[str] = field(default_factory=list)
     encoded_columns_: list[str] = field(default_factory=list)
     categorical_columns_: list[str] = field(default_factory=list)
@@ -234,7 +258,14 @@ def train_upi_model(
         },
         "feature_count": int(len(builder.encoded_columns_)),
         "raw_feature_count": int(len(builder.raw_columns_)),
+        "feature_scope": "upi_transaction_stable_api_fields",
         "upi_transaction_columns": [c for c in UPI_TRANSACTION_COLUMNS if c in builder.raw_columns_],
+        "excluded_upi_transaction_columns": builder.excluded_raw_columns_,
+        "excluded_upi_transaction_reason": (
+            "Excluded from default training because these generated transaction features have "
+            "implausibly high standalone target separation in the supplied synthetic UPI file "
+            "or are direct derivatives of failed/instability behavior."
+        ),
         "engineered_feature_columns": list(ENGINEERED_UPI_COLUMNS),
         "selected_candidate": result["selected_candidate"],
         "selected_params": result["selected_params"],
@@ -254,6 +285,8 @@ def train_upi_model(
         },
         "notes": [
             "This UPI model is standalone and does not overwrite FULL or REDUCED artifacts.",
+            "UPI training is restricted to the same stable transaction fields available to the UPI API tier.",
+            "High-risk target-proxy UPI fields are excluded by default instead of being used to inflate AUC.",
             "DAYS_EMPLOYED=365243 is converted to DAYS_EMPLOYED_ANOM=1 and excluded as a real duration.",
             "Known empty source columns are dropped before modeling.",
             "Class imbalance is handled with XGBoost scale_pos_weight; AUC-ROC and AUC-PR are reported.",
@@ -265,7 +298,9 @@ def train_upi_model(
 
 def fit_upi_builder(train_df: pd.DataFrame, save_path: str | None = None) -> UpiFeatureBuilder:
     raw_columns = _select_upi_raw_columns(train_df)
+    excluded_columns = _select_excluded_upi_raw_columns(train_df, raw_columns)
     pre_model = _build_upi_pre_model_frame(train_df, raw_columns=raw_columns)
+    pre_model = pre_model.loc[:, pre_model.notna().any(axis=0)]
     categorical_cols = [c for c in KNOWN_CATEGORICAL_COLUMNS if c in pre_model.columns]
     categorical_fill_values = {col: "Unknown" for col in categorical_cols}
     rare_maps = _fit_rare_category_maps(pre_model, categorical_cols)
@@ -278,7 +313,9 @@ def fit_upi_builder(train_df: pd.DataFrame, save_path: str | None = None) -> Upi
     missing_flags = _fit_missing_flag_columns(prepared)
     prepared = _create_missing_flag_columns(prepared, missing_flags)
     numeric_cols = [
-        c for c in prepared.select_dtypes(include=[np.number]).columns if not c.endswith("_IS_MISSING")
+        c
+        for c in prepared.select_dtypes(include=[np.number]).columns
+        if not c.endswith("_IS_MISSING") and prepared[c].notna().any()
     ]
     numeric_imputers = _fit_numeric_imputers(prepared, numeric_cols)
     prepared = _fill_numeric_columns(prepared, numeric_imputers)
@@ -289,6 +326,7 @@ def fit_upi_builder(train_df: pd.DataFrame, save_path: str | None = None) -> Upi
 
     builder = UpiFeatureBuilder(
         raw_columns_=raw_columns,
+        excluded_raw_columns_=excluded_columns,
         pre_model_columns_=pre_model.columns.tolist(),
         encoded_columns_=encoded.columns.tolist(),
         categorical_columns_=categorical_cols,
@@ -388,8 +426,18 @@ def _load_upi_bundle(dataset_path: str, *, sample_rows: int | None = None) -> di
 
 
 def _select_upi_raw_columns(df: pd.DataFrame) -> list[str]:
-    blocked = {TARGET_COLUMN, *ID_COLUMNS, *EMPTY_SOURCE_COLUMNS}
-    return [c for c in df.columns if c not in blocked]
+    blocked = {TARGET_COLUMN, *ID_COLUMNS, *EMPTY_SOURCE_COLUMNS, *UPI_HIGH_RISK_PROXY_COLUMNS}
+    return [c for c in UPI_STABLE_TRANSACTION_COLUMNS if c in df.columns and c not in blocked]
+
+
+def _select_excluded_upi_raw_columns(df: pd.DataFrame, selected_columns: list[str]) -> list[str]:
+    selected = set(selected_columns)
+    excluded = [
+        c
+        for c in UPI_TRANSACTION_COLUMNS
+        if c in df.columns and c not in selected
+    ]
+    return sorted(excluded)
 
 
 def _build_upi_pre_model_frame(
@@ -498,7 +546,11 @@ def _engineer_upi_features(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["UPI_ACTIVE_DAY_RATIO"] = _safe_div(pd.to_numeric(df["active_days"], errors="coerce"), 30.0)
     volatility_cols = ["inflow_volatility", "outflow_volatility", "txn_value_std"]
-    df["UPI_VOLATILITY_MEAN"] = df[volatility_cols].mean(axis=1)
+    volatility_frame = df[volatility_cols]
+    if volatility_frame.notna().any(axis=None):
+        df["UPI_VOLATILITY_MEAN"] = volatility_frame.mean(axis=1)
+    else:
+        df["UPI_VOLATILITY_MEAN"] = np.nan
     df["UPI_LIQUIDITY_PRESSURE_SCORE"] = (
         pd.to_numeric(df["balance_instability_score"], errors="coerce").fillna(0.0)
         + df["UPI_FAILED_TXN_RATIO"].fillna(0.0)
@@ -534,28 +586,28 @@ def _train_xgboost_upi(
     scale_pos_weight = float(neg / max(pos, 1))
     candidates = [
         (
-            "baseline",
+            "conservative_stable_upi",
             {
-                "n_estimators": 220,
-                "max_depth": 4,
-                "learning_rate": 0.05,
-                "subsample": 0.9,
-                "colsample_bytree": 0.9,
-                "reg_lambda": 1.5,
-                "min_child_weight": 4.0,
+                "n_estimators": 160,
+                "max_depth": 2,
+                "learning_rate": 0.025,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "reg_lambda": 10.0,
+                "min_child_weight": 25.0,
                 "scale_pos_weight": scale_pos_weight,
             },
         ),
         (
-            "regularized",
+            "regularized_stable_upi",
             {
-                "n_estimators": 420,
+                "n_estimators": 220,
                 "max_depth": 3,
                 "learning_rate": 0.03,
-                "subsample": 0.85,
-                "colsample_bytree": 0.8,
-                "reg_lambda": 3.0,
-                "min_child_weight": 8.0,
+                "subsample": 0.8,
+                "colsample_bytree": 0.75,
+                "reg_lambda": 12.0,
+                "min_child_weight": 30.0,
                 "scale_pos_weight": scale_pos_weight,
             },
         ),
@@ -665,7 +717,7 @@ def _apply_rare_category_maps(
 
 def _fit_missing_flag_columns(df: pd.DataFrame, *, threshold: float = 0.05) -> list[str]:
     miss_rate = df.isna().mean()
-    return miss_rate[miss_rate >= threshold].index.tolist()
+    return miss_rate[(miss_rate >= threshold) & (miss_rate < 1.0)].index.tolist()
 
 
 def _create_missing_flag_columns(df: pd.DataFrame, flag_cols: list[str]) -> pd.DataFrame:

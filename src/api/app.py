@@ -51,6 +51,21 @@ CATEGORICAL_APPLICATION_FIELDS = frozenset(
         "WEEKDAY_APPR_PROCESS_START",
     }
 )
+UI_FIELD_HELP: Mapping[str, tuple[str, str]] = MappingProxyType(
+    {
+        "monthly_inflow": ("Monthly UPI Inflow", "Total money received through UPI in a month."),
+        "monthly_outflow": ("Monthly UPI Outflow", "Total money sent through UPI in a month."),
+        "monthly_txn_count": ("Monthly UPI Transaction Count", "Total UPI transactions in the month."),
+        "avg_txn_value": ("Average UPI Transaction Value", "Average amount per UPI transaction."),
+        "median_txn_value": ("Median UPI Transaction Value", "Middle transaction value for the month."),
+        "inflow_txn_count": ("UPI Inflow Transaction Count", "Number of incoming UPI transactions."),
+        "outflow_txn_count": ("UPI Outflow Transaction Count", "Number of outgoing UPI transactions."),
+        "weekday_txn_ratio": ("Weekday Transaction Ratio", "Share of UPI transactions on weekdays, from 0 to 1."),
+        "weekend_txn_ratio": ("Weekend Transaction Ratio", "Share of UPI transactions on weekends, from 0 to 1."),
+        "distinct_counterparties": ("Distinct UPI Counterparties", "Number of unique people or merchants transacted with."),
+        "active_days": ("Active UPI Days", "Number of days with at least one UPI transaction in the month."),
+    }
+)
 DEMO_FIELD_OPTIONS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "NAME_CONTRACT_TYPE": ("Cash loans", "Revolving loans"),
@@ -111,8 +126,8 @@ APPLICATION_REQUIRED_FIELDS: tuple[str, ...] = (
     "OCCUPATION_TYPE",
     "ORGANIZATION_TYPE",
     "WEEKDAY_APPR_PROCESS_START",
-    "DAYS_EMPLOYED_ANOM",
 )
+APPLICATION_DERIVED_FIELDS: tuple[str, ...] = ("DAYS_EMPLOYED_ANOM",)
 AGG_REQUIRED_FIELDS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "bureau_agg": (
@@ -185,15 +200,8 @@ FULL_ONLY_SECTIONS = frozenset(FULL_ONLY_SECTION_ORDER)
 UPI_SECTION = "upi_agg"
 UPI_SECTION_ORDER: tuple[str, ...] = (UPI_SECTION,)
 UPI_REQUIRED_FIELDS: tuple[str, ...] = (
-    "balance_instability_score",
-    "failed_due_to_low_balance",
-    "failed_txn_count",
-    "outflow_volatility",
-    "inflow_volatility",
-    "txn_value_std",
     "monthly_inflow",
     "monthly_outflow",
-    "success_txn_count",
     "monthly_txn_count",
     "avg_txn_value",
     "median_txn_value",
@@ -203,7 +211,6 @@ UPI_REQUIRED_FIELDS: tuple[str, ...] = (
     "weekend_txn_ratio",
     "distinct_counterparties",
     "active_days",
-    "peak_txn_day_count",
 )
 ALLOWED_TOP_LEVEL_KEYS = frozenset((*FULL_REQUIRED_SECTIONS, UPI_SECTION))
 
@@ -481,6 +488,7 @@ def validate_payload(payload: dict) -> tuple[str | None, list[str]]:
 
     if not isinstance(payload, dict):
         return "bad_request", []
+    payload = _with_derived_fields(payload)
 
     unexpected_top_keys = sorted(set(payload) - ALLOWED_TOP_LEVEL_KEYS)
     if unexpected_top_keys:
@@ -566,6 +574,7 @@ def determine_coverage_tier(payload: dict) -> str:
 def build_input_df(payload: dict, tier: str) -> pd.DataFrame:
     """Flatten a valid request payload into a one-row DataFrame."""
 
+    payload = _with_derived_fields(payload)
     tier = tier.upper()
     if tier not in {"FULL", "REDUCED", "UPI"}:
         raise ValueError("tier must be FULL, REDUCED, or UPI")
@@ -596,6 +605,86 @@ def build_input_df(payload: dict, tier: str) -> pd.DataFrame:
         _add_upi_alias_fields(flattened)
 
     return pd.DataFrame([flattened])
+
+
+def _with_derived_fields(payload: dict) -> dict:
+    """Return a copy of the payload with deterministic derived fields filled."""
+
+    normalized = json.loads(json.dumps(payload))
+    application = normalized.get("application")
+    if isinstance(application, dict):
+        _add_application_derived_fields(application)
+    if isinstance(normalized.get(UPI_SECTION), dict):
+        _add_upi_derived_fields(normalized[UPI_SECTION])
+    if set(normalized) == set(FULL_SECTION_ORDER):
+        _add_full_aggregate_derived_fields(normalized)
+    return normalized
+
+
+def _safe_ratio(numerator: Any, denominator: Any, default: float = 0.0) -> float:
+    try:
+        num = float(numerator)
+        den = float(denominator)
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(num) or not np.isfinite(den) or den == 0:
+        return default
+    return num / den
+
+
+def _add_application_derived_fields(application: dict[str, Any]) -> None:
+    employed = _coerce_float(application.get("DAYS_EMPLOYED"))
+    application["DAYS_EMPLOYED_ANOM"] = 1 if employed == 365243 else 0
+
+
+def _add_upi_derived_fields(upi_section: dict[str, Any]) -> None:
+    inflow = upi_section.get("monthly_inflow")
+    outflow = upi_section.get("monthly_outflow")
+    monthly_txn = upi_section.get("monthly_txn_count")
+    inflow_txn = upi_section.get("inflow_txn_count")
+    outflow_txn = upi_section.get("outflow_txn_count")
+    active_days = upi_section.get("active_days")
+    upi_section["UPI_NET_MONTHLY_CASHFLOW"] = _safe_ratio(inflow, 1.0) - _safe_ratio(outflow, 1.0)
+    upi_section["UPI_OUTFLOW_INFLOW_RATIO"] = _safe_ratio(outflow, inflow)
+    upi_section["UPI_COUNTERPARTY_DIVERSITY"] = _safe_ratio(upi_section.get("distinct_counterparties"), monthly_txn)
+    upi_section["UPI_ACTIVE_DAY_RATIO"] = _safe_ratio(active_days, 30.0)
+    upi_section["UPI_INFLOW_TXN_RATIO"] = _safe_ratio(inflow_txn, monthly_txn)
+    upi_section["UPI_OUTFLOW_TXN_RATIO"] = _safe_ratio(outflow_txn, monthly_txn)
+
+
+def _add_full_aggregate_derived_fields(payload: dict[str, Any]) -> None:
+    bureau = payload.get("bureau_agg", {})
+    previous = payload.get("previous_agg", {})
+    installments = payload.get("installments_agg", {})
+    pos_cash = payload.get("pos_cash_agg", {})
+    credit_card = payload.get("credit_card_agg", {})
+
+    bureau["BUREAU_DEBT_TO_CREDIT_RATIO"] = _safe_ratio(
+        bureau.get("BUREAU_AMT_CREDIT_SUM_DEBT_SUM"),
+        bureau.get("BUREAU_AMT_CREDIT_SUM_SUM"),
+    )
+    previous_total = _safe_ratio(previous.get("PREV_APP_COUNT"), 1.0)
+    previous["PREV_APPROVAL_RATE"] = _safe_ratio(previous.get("PREV_APPROVED_COUNT"), previous_total)
+    previous["PREV_REFUSAL_RATE"] = _safe_ratio(previous.get("PREV_REFUSED_COUNT"), previous_total)
+    previous["PREV_APP_CREDIT_DIFF_MEAN"] = (
+        _safe_ratio(previous.get("PREV_AMT_APPLICATION_MEAN"), 1.0)
+        - _safe_ratio(previous.get("PREV_AMT_CREDIT_MEAN"), 1.0)
+    )
+    previous.setdefault("PREV_RATE_DOWN_PAYMENT_MEAN", 0.0)
+    installments["INST_MISSED_RATE"] = _safe_ratio(
+        installments.get("INST_LATE_COUNT"),
+        installments.get("INST_RECORD_COUNT"),
+    )
+    installments.setdefault("INST_PAYMENT_RATIO_MEAN", 0.0)
+    installments.setdefault("INST_PAYMENT_RATIO_MIN", 0.0)
+    pos_total = _safe_ratio(pos_cash.get("POS_RECORD_COUNT"), 1.0)
+    pos_cash["POS_COMPLETED_RATE"] = _safe_ratio(pos_cash.get("POS_COMPLETED_COUNT"), pos_total)
+    pos_cash["POS_ACTIVE_RATE"] = _safe_ratio(pos_cash.get("POS_ACTIVE_COUNT"), pos_total)
+    credit_card["CC_UTILIZATION_MEAN"] = _safe_ratio(
+        credit_card.get("CC_BALANCE_MEAN"),
+        credit_card.get("CC_LIMIT_MEAN"),
+    )
+    credit_card.setdefault("CC_PAYMENT_RATIO_MEAN", 0.0)
 
 
 def _add_upi_alias_fields(flattened: dict[str, Any]) -> None:
@@ -1142,6 +1231,11 @@ def _build_demo_seed_payload() -> dict[str, Any]:
 
 def _build_demo_config(runtime: ApiRuntime) -> dict[str, Any]:
     sample_payload = _build_demo_seed_payload()
+    sample_payload["application"] = {
+        key: value
+        for key, value in sample_payload["application"].items()
+        if key not in APPLICATION_DERIVED_FIELDS
+    }
     full_sample_payload = _without_upi_section(sample_payload)
     sections: list[dict[str, Any]] = []
 
@@ -1172,11 +1266,18 @@ def _build_demo_config(runtime: ApiRuntime) -> dict[str, Any]:
     upi_fields = [
         {
             "name": field_name,
+            "label": UI_FIELD_HELP.get(field_name, (field_name.replace("_", " ").title(), ""))[0],
+            "hint": UI_FIELD_HELP.get(field_name, ("", ""))[1],
             "kind": "number",
             "options": [],
         }
         for field_name in UPI_REQUIRED_FIELDS
     ]
+    upi_sample_payload = {
+        field_name: sample_payload[UPI_SECTION][field_name]
+        for field_name in UPI_REQUIRED_FIELDS
+        if field_name in sample_payload[UPI_SECTION]
+    }
     supported_tiers = list(runtime.coverage_tiers_available)
 
     return {
@@ -1196,7 +1297,7 @@ def _build_demo_config(runtime: ApiRuntime) -> dict[str, Any]:
         "samplePayloads": {
             "FULL": full_sample_payload,
             "REDUCED": {"application": sample_payload["application"]},
-            "UPI": {UPI_SECTION: sample_payload[UPI_SECTION]},
+            "UPI": {UPI_SECTION: upi_sample_payload},
         },
         "routes": {
             "health": "/health",

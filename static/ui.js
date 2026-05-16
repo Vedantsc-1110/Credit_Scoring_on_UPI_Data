@@ -86,15 +86,8 @@
             "CC_DRAWINGS_CURRENT_SUM",
         ],
         upi_agg: [
-            "balance_instability_score",
-            "failed_due_to_low_balance",
-            "failed_txn_count",
-            "outflow_volatility",
-            "inflow_volatility",
-            "txn_value_std",
             "monthly_inflow",
             "monthly_outflow",
-            "success_txn_count",
             "monthly_txn_count",
             "avg_txn_value",
             "median_txn_value",
@@ -104,8 +97,94 @@
             "weekend_txn_ratio",
             "distinct_counterparties",
             "active_days",
-            "peak_txn_day_count",
         ],
+    };
+
+    const DERIVED_FIELDS = {
+        application: new Set(["DAYS_EMPLOYED_ANOM"]),
+        bureau_agg: new Set(["BUREAU_DEBT_TO_CREDIT_RATIO"]),
+        previous_agg: new Set(["PREV_APPROVAL_RATE", "PREV_REFUSAL_RATE", "PREV_APP_CREDIT_DIFF_MEAN", "PREV_RATE_DOWN_PAYMENT_MEAN"]),
+        installments_agg: new Set(["INST_MISSED_RATE", "INST_PAYMENT_RATIO_MEAN", "INST_PAYMENT_RATIO_MIN"]),
+        pos_cash_agg: new Set(["POS_COMPLETED_RATE", "POS_ACTIVE_RATE"]),
+        credit_card_agg: new Set(["CC_UTILIZATION_MEAN", "CC_PAYMENT_RATIO_MEAN"]),
+        upi_agg: new Set([
+            "balance_instability_score",
+            "failed_due_to_low_balance",
+            "failed_txn_count",
+            "outflow_volatility",
+            "inflow_volatility",
+            "txn_value_std",
+            "success_txn_count",
+            "peak_txn_day_count",
+        ]),
+    };
+
+    const FIELD_COPY = {
+        AMT_INCOME_TOTAL_CAPPED: ["Monthly/Annual Income", "Enter the applicant's total income used for credit assessment."],
+        AMT_CREDIT: ["Loan Amount Requested", "Total credit amount requested by the applicant."],
+        AMT_ANNUITY: ["Expected EMI / Annuity", "Regular repayment amount for the loan."],
+        AMT_GOODS_PRICE: ["Goods Price", "Price of the item or asset being financed."],
+        DAYS_BIRTH: ["Age In Days", "Enter age converted to days, as a positive number. Example: 35 years is about 12784 days."],
+        DAYS_EMPLOYED: ["Employment Length In Days", "Enter total days employed as a positive number. The system handles special anomaly flags."],
+        DAYS_REGISTRATION: ["Days Since Registration", "How long ago the applicant changed registration details. Enter a positive number of days."],
+        DAYS_ID_PUBLISH: ["Days Since ID Was Issued", "How long ago the applicant's ID document was issued. Enter a positive number of days."],
+        DAYS_LAST_PHONE_CHANGE: ["Days Since Phone Changed", "How long ago the applicant changed phone number. Enter a positive number of days."],
+        EXT_SOURCE_1: ["External Credit Score 1", "Score between 0 and 1 from an external source."],
+        EXT_SOURCE_2: ["External Credit Score 2", "Score between 0 and 1 from an external source."],
+        EXT_SOURCE_3: ["External Credit Score 3", "Score between 0 and 1 from an external source."],
+        NAME_CONTRACT_TYPE: ["Loan Type", "Choose the contract type."],
+        NAME_EDUCATION_TYPE: ["Education Level", "Applicant's highest education level."],
+        NAME_FAMILY_STATUS: ["Family Status", "Applicant's current family status."],
+        OCCUPATION_TYPE: ["Occupation", "Applicant's occupation category."],
+        ORGANIZATION_TYPE: ["Organization Type", "Applicant's employer or organization type."],
+        BUREAU_LOAN_COUNT: ["Bureau Loan Count", "Number of credit bureau loans found for this applicant."],
+        BUREAU_ACTIVE_COUNT: ["Active Bureau Loans", "Number of currently active bureau loans."],
+        BUREAU_CLOSED_COUNT: ["Closed Bureau Loans", "Number of closed bureau loans."],
+        BUREAU_AMT_CREDIT_SUM_SUM: ["Total Bureau Credit", "Total sanctioned credit amount across bureau loans."],
+        BUREAU_AMT_CREDIT_SUM_DEBT_SUM: ["Total Bureau Debt", "Outstanding debt across bureau loans."],
+        BUREAU_AMT_CREDIT_SUM_OVERDUE_SUM: ["Total Overdue Bureau Amount", "Total overdue amount reported by bureau."],
+        BUREAU_CREDIT_DAY_OVERDUE_MAX: ["Max Bureau Days Overdue", "Maximum days overdue on bureau loans."],
+        BUREAU_DAYS_CREDIT_MAX: ["Most Recent Bureau Credit Age", "Days since the most recent bureau credit record."],
+        BUREAU_CNT_CREDIT_PROLONG_SUM: ["Credit Prolongations", "Total number of bureau credit prolongations."],
+        PREV_APP_COUNT: ["Previous Application Count", "Number of previous applications."],
+        PREV_APPROVED_COUNT: ["Previous Approved Count", "Number of previous applications approved."],
+        PREV_REFUSED_COUNT: ["Previous Refused Count", "Number of previous applications refused."],
+        PREV_AMT_APPLICATION_MEAN: ["Average Previous Requested Amount", "Average amount requested in previous applications."],
+        PREV_AMT_CREDIT_MEAN: ["Average Previous Approved Credit", "Average credit amount granted previously."],
+        PREV_AMT_GOODS_PRICE_MEAN: ["Average Previous Goods Price", "Average goods price in previous applications."],
+        PREV_DAYS_DECISION_MAX: ["Most Recent Previous Decision Age", "Days since the most recent previous application decision."],
+        PREV_RATE_DOWN_PAYMENT_MEAN: ["Average Down Payment Rate", "Average down payment ratio from previous applications."],
+        INST_RECORD_COUNT: ["Installment Record Count", "Number of installment payment records."],
+        INST_DPD_MEAN: ["Average Installment Days Past Due", "Average days past due across installment records."],
+        INST_DPD_MAX: ["Max Installment Days Past Due", "Maximum days past due across installment records."],
+        INST_PAYMENT_RATIO_MEAN: ["Average Installment Payment Ratio", "Average paid amount divided by expected installment amount."],
+        INST_PAYMENT_RATIO_MIN: ["Minimum Installment Payment Ratio", "Lowest paid amount divided by expected installment amount."],
+        INST_LATE_COUNT: ["Late Installment Count", "Number of late installment payments."],
+        POS_RECORD_COUNT: ["POS Cash Record Count", "Number of POS cash records."],
+        POS_DPD_MEAN: ["Average POS Days Past Due", "Average days past due for POS cash records."],
+        POS_DPD_MAX: ["Max POS Days Past Due", "Maximum days past due for POS cash records."],
+        POS_DPD_DEF_MEAN: ["Average POS Default DPD", "Average default-level days past due."],
+        POS_DPD_DEF_MAX: ["Max POS Default DPD", "Maximum default-level days past due."],
+        POS_CNT_INSTALMENT_FUTURE_MEAN: ["Average Future POS Installments", "Average remaining future installments."],
+        CC_RECORD_COUNT: ["Credit Card Record Count", "Number of credit card records."],
+        CC_BALANCE_MEAN: ["Average Credit Card Balance", "Average outstanding credit card balance."],
+        CC_LIMIT_MEAN: ["Average Credit Card Limit", "Average credit card limit."],
+        CC_PAYMENT_RATIO_MEAN: ["Average Credit Card Payment Ratio", "Average payment amount divided by due amount."],
+        CC_DPD_MEAN: ["Average Credit Card Days Past Due", "Average credit card days past due."],
+        CC_DPD_MAX: ["Max Credit Card Days Past Due", "Maximum credit card days past due."],
+        CC_DRAWINGS_ATM_SUM: ["ATM Drawings Total", "Total ATM cash withdrawal amount on credit card."],
+        CC_DRAWINGS_CURRENT_SUM: ["Current Drawings Total", "Total current drawing amount on credit card."],
+        monthly_inflow: ["Monthly UPI Inflow", "Total money received through UPI in a month."],
+        monthly_outflow: ["Monthly UPI Outflow", "Total money sent through UPI in a month."],
+        monthly_txn_count: ["Monthly UPI Transaction Count", "Total UPI transactions in the month."],
+        avg_txn_value: ["Average UPI Transaction Value", "Average amount per UPI transaction."],
+        median_txn_value: ["Median UPI Transaction Value", "Middle transaction value for the month."],
+        inflow_txn_count: ["UPI Inflow Transaction Count", "Number of incoming UPI transactions."],
+        outflow_txn_count: ["UPI Outflow Transaction Count", "Number of outgoing UPI transactions."],
+        weekday_txn_ratio: ["Weekday Transaction Ratio", "Share of UPI transactions on weekdays, from 0 to 1."],
+        weekend_txn_ratio: ["Weekend Transaction Ratio", "Share of UPI transactions on weekends, from 0 to 1."],
+        distinct_counterparties: ["Distinct UPI Counterparties", "Number of unique people or merchants transacted with."],
+        active_days: ["Active UPI Days", "Number of days with at least one UPI transaction in the month."],
     };
 
     function cloneValue(value) {
@@ -218,6 +297,71 @@
         return rawValue;
     }
 
+    function sectionValue(payload, sectionName, fieldName) {
+        const section = payload[sectionName] || {};
+        const value = Number.parseFloat(section[fieldName]);
+        return Number.isFinite(value) ? value : 0;
+    }
+
+    function setDerived(payload, sectionName, fieldName, value) {
+        payload[sectionName] = payload[sectionName] || {};
+        payload[sectionName][fieldName] = Number.isFinite(value) ? value : 0;
+    }
+
+    function ratio(numerator, denominator) {
+        return denominator ? numerator / denominator : 0;
+    }
+
+    function applyDerivedFields(payload) {
+        if (payload.application) {
+            const employed = sectionValue(payload, "application", "DAYS_EMPLOYED");
+            payload.application.DAYS_EMPLOYED_ANOM = employed === 365243 || employed === -365243 ? 1 : 0;
+        }
+        if (payload.bureau_agg) {
+            setDerived(payload, "bureau_agg", "BUREAU_DEBT_TO_CREDIT_RATIO", ratio(
+                sectionValue(payload, "bureau_agg", "BUREAU_AMT_CREDIT_SUM_DEBT_SUM"),
+                sectionValue(payload, "bureau_agg", "BUREAU_AMT_CREDIT_SUM_SUM"),
+            ));
+        }
+        if (payload.previous_agg) {
+            const total = sectionValue(payload, "previous_agg", "PREV_APP_COUNT");
+            setDerived(payload, "previous_agg", "PREV_APPROVAL_RATE", ratio(sectionValue(payload, "previous_agg", "PREV_APPROVED_COUNT"), total));
+            setDerived(payload, "previous_agg", "PREV_REFUSAL_RATE", ratio(sectionValue(payload, "previous_agg", "PREV_REFUSED_COUNT"), total));
+            setDerived(
+                payload,
+                "previous_agg",
+                "PREV_APP_CREDIT_DIFF_MEAN",
+                sectionValue(payload, "previous_agg", "PREV_AMT_APPLICATION_MEAN") - sectionValue(payload, "previous_agg", "PREV_AMT_CREDIT_MEAN"),
+            );
+            setDerived(payload, "previous_agg", "PREV_RATE_DOWN_PAYMENT_MEAN", 0);
+        }
+        if (payload.installments_agg) {
+            setDerived(payload, "installments_agg", "INST_MISSED_RATE", ratio(
+                sectionValue(payload, "installments_agg", "INST_LATE_COUNT"),
+                sectionValue(payload, "installments_agg", "INST_RECORD_COUNT"),
+            ));
+            setDerived(payload, "installments_agg", "INST_PAYMENT_RATIO_MEAN", 0);
+            setDerived(payload, "installments_agg", "INST_PAYMENT_RATIO_MIN", 0);
+        }
+        if (payload.credit_card_agg) {
+            setDerived(payload, "credit_card_agg", "CC_UTILIZATION_MEAN", ratio(
+                sectionValue(payload, "credit_card_agg", "CC_BALANCE_MEAN"),
+                sectionValue(payload, "credit_card_agg", "CC_LIMIT_MEAN"),
+            ));
+            setDerived(payload, "credit_card_agg", "CC_PAYMENT_RATIO_MEAN", 0);
+        }
+        if (payload.upi_agg) {
+            delete payload.upi_agg.balance_instability_score;
+            delete payload.upi_agg.failed_due_to_low_balance;
+            delete payload.upi_agg.failed_txn_count;
+            delete payload.upi_agg.outflow_volatility;
+            delete payload.upi_agg.inflow_volatility;
+            delete payload.upi_agg.txn_value_std;
+            delete payload.upi_agg.success_txn_count;
+            delete payload.upi_agg.peak_txn_day_count;
+        }
+    }
+
     function buildPayload(form) {
         const payload = cloneValue((config.samplePayloads || {})[state.tier] || {});
         const sections = state.tier === "FULL"
@@ -244,6 +388,9 @@
         sections.forEach((sectionName) => {
             payload[sectionName] = payload[sectionName] || {};
             FIELD_GROUPS[sectionName].forEach((fieldName) => {
+                if (DERIVED_FIELDS[sectionName] && DERIVED_FIELDS[sectionName].has(fieldName)) {
+                    return;
+                }
                 const control = form.querySelector(`[data-section="${sectionName}"][name="${fieldName}"]`);
                 if (!control) {
                     return;
@@ -263,11 +410,40 @@
                 payload[sectionName][fieldName] = value;
             });
         });
+        applyDerivedFields(payload);
 
         return {
             missing,
             payload,
         };
+    }
+
+    function enhanceFieldCopy(form) {
+        form.querySelectorAll(".input-field").forEach((wrapper) => {
+            const control = wrapper.querySelector("input, select");
+            const label = wrapper.querySelector("label");
+            if (!control || !label) {
+                return;
+            }
+            const derived = DERIVED_FIELDS[control.dataset.section] && DERIVED_FIELDS[control.dataset.section].has(control.name);
+            if (derived) {
+                wrapper.classList.add("is-hidden");
+                control.disabled = true;
+                return;
+            }
+            const copy = FIELD_COPY[control.name];
+            if (!copy) {
+                label.textContent = control.name.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+                return;
+            }
+            label.textContent = copy[0];
+            if (!wrapper.querySelector(".field-hint")) {
+                const hint = document.createElement("p");
+                hint.className = "field-hint";
+                hint.textContent = copy[1];
+                wrapper.appendChild(hint);
+            }
+        });
     }
 
     function renderMetadata(elements, response) {
@@ -399,6 +575,8 @@
             metadata: document.getElementById("result-metadata"),
             driverList: document.getElementById("driver-list"),
         };
+
+        enhanceFieldCopy(elements.form);
 
         elements.tierButtons.forEach((button) => {
             button.addEventListener("click", function () {

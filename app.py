@@ -182,30 +182,11 @@ WHAT_IF_FIELD_SPECS = (
     },
     {
         "section": "upi_agg",
-        "name": "failed_txn_count",
-        "label": "Failed UPI Transactions",
+        "name": "monthly_txn_count",
+        "label": "UPI Monthly Transaction Count",
         "step": "1",
         "min": "0",
         "control": "number",
-    },
-    {
-        "section": "upi_agg",
-        "name": "failed_due_to_low_balance",
-        "label": "Low Balance Failures",
-        "step": "1",
-        "min": "0",
-        "control": "number",
-    },
-    {
-        "section": "upi_agg",
-        "name": "balance_instability_score",
-        "label": "Balance Instability Score",
-        "step": "0.01",
-        "min": "0",
-        "max": "1",
-        "control": "slider",
-        "value_kind": "ratio",
-        "decimals": 2,
     },
 )
 

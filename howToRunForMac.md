@@ -1,0 +1,390 @@
+**Real Pipeline Runbook For macOS**
+
+Run everything from the repo root:
+
+```bash
+cd /Users/swanandkalekar/Desktop/AI_CreditScoring
+```
+
+This is the real-data flow. It requires these raw files in `data/raw/`:
+
+- `application_train.csv`
+- `application_test.csv`
+- `bureau.csv`
+- `bureau_balance.csv`
+- `previous_application.csv`
+- `installments_payments.csv`
+- `POS_CASH_balance.csv`
+- `credit_card_balance.csv`
+- `final_base_with_upi_corrected.csv` for the standalone UPI model
+
+Use `venv/bin/python` directly, or activate the virtual environment with `source venv/bin/activate`.
+
+If LightGBM fails with `Library not loaded: @rpath/libomp.dylib` or an `incompatible architecture` message, recreate the venv with an ARM Python. On this Mac, Python 3.9 is `x86_64`, while Homebrew `libomp` is `arm64`, so use Python 3.11:
+
+```bash
+deactivate
+mv venv venv_x86_backup
+arch -arm64 /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 -m venv venv
+venv/bin/python -m pip install --upgrade pip
+venv/bin/python -m pip install -r requirements.txt
+venv/bin/python -c "import platform; print(platform.machine())"
+```
+
+The last command should print `arm64`.
+
+---
+
+**1. One-Time Setup**
+
+```bash
+arch -arm64 /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 -m venv venv
+venv/bin/python -m pip install --upgrade pip
+venv/bin/python -m pip install -r requirements.txt
+```
+
+Set the repo paths for this terminal session:
+
+```bash
+export DATA_RAW_DIR="data/raw/"
+export DATA_PROCESSED_DIR="data/processed/"
+export ARTIFACT_DIR="artifacts/"
+export EDA_PLOTS_DIR="notebooks/eda_plots/"
+export SHAP_PLOTS_DIR="notebooks/shap_plots/"
+export FAIRNESS_PLOTS_DIR="notebooks/fairness_plots/"
+export EVAL_PLOTS_DIR="notebooks/eval_plots/"
+```
+
+---
+
+**2. Run The Offline Pipeline**
+
+**Module 1: data processing**
+
+```bash
+venv/bin/python -m src.data_pipeline
+```
+
+Check the outputs:
+
+```bash
+ls data/processed
+head -40 data/processed/processed_artifact_manifest.json
+ls -l data/data_quality_report.json
+ls notebooks/eda_plots
+```
+
+You should see at least:
+
+- `train.pkl`
+- `val_model.pkl`
+- `val_policy.pkl`
+- `test.pkl`
+- `app_test_adv.pkl`
+- `income_cap.joblib`
+- `processed_artifact_manifest.json`
+
+**Module 2: feature builders**
+
+```bash
+venv/bin/python -m src.feature_engineering
+```
+
+Check that both builders load cleanly:
+
+```bash
+venv/bin/python - <<'PY'
+from src.builder_artifacts import load_validated_builders
+
+builders = load_validated_builders(
+    artifact_dir="artifacts",
+    processed_dir="data/processed",
+    strict_artifacts=True,
+)
+print("FULL", builders["FULL"].tier, len(builders["FULL"].encoded_columns_))
+print("REDUCED", builders["REDUCED"].tier, len(builders["REDUCED"].encoded_columns_))
+PY
+```
+
+**Module 3: training + reproducibility**
+
+```bash
+venv/bin/python -m src.models.train
+```
+
+Check the training outputs:
+
+```bash
+ls artifacts
+venv/bin/python - <<'PY'
+import json
+
+with open("artifacts/reproducibility_report.json", "r", encoding="utf-8") as f:
+    r = json.load(f)
+
+print("full_model_version:", r["full_model_version"])
+print("full_model_family:", r["tiers"]["FULL"]["model_family"])
+print("full_selected_candidate:", r["tiers"]["FULL"]["selection"]["candidate"])
+print("reduced_model_version:", r["reduced_model_version"])
+print("processed_manifest_fingerprint:", r["processed_manifest_fingerprint"])
+PY
+```
+
+Expected current truth:
+
+- FULL version: `full_weighted_blend_v2.2.0`
+- FULL family: `weighted_blend`
+- FULL selected candidate: `weighted_blend_full`
+- REDUCED version: `reduced_v2.1.0`
+
+**Module 3B: standalone UPI model**
+
+This trains the new UPI model from:
+
+```text
+data/raw/final_base_with_upi_corrected.csv
+```
+
+It does not overwrite the existing FULL or REDUCED artifacts. It creates a separate UPI artifact set.
+
+```bash
+venv/bin/python -m src.models.upi
+```
+
+Useful options:
+
+```bash
+venv/bin/python -m src.models.upi --help
+venv/bin/python -m src.models.upi --sample-rows 1000 --artifact-dir artifacts/upi_smoke
+venv/bin/python -m src.models.upi --dataset-path data/raw/final_base_with_upi_corrected.csv --artifact-dir artifacts/
+```
+
+Expected UPI outputs:
+
+- `artifacts/upi_feature_builder.joblib`
+- `artifacts/upi_model.joblib`
+- `artifacts/upi_calibrator.joblib`
+- `artifacts/upi_shap_explainer.joblib`
+- `artifacts/upi_training_report.json`
+
+Check the UPI report:
+
+```bash
+venv/bin/python - <<'PY'
+import json
+
+with open("artifacts/upi_training_report.json", "r", encoding="utf-8") as f:
+    r = json.load(f)
+
+print("upi_model_version:", r["model_version"])
+print("feature_count:", r["feature_count"])
+print("roc_auc:", r["metrics"]["roc_auc"])
+print("auc_pr:", r["metrics"]["auc_pr"])
+print("brier_score:", r["metrics"]["brier_score"])
+print("default_rate:", r["metrics"]["default_rate"])
+PY
+```
+
+Score a few rows from the UPI CSV directly:
+
+```bash
+venv/bin/python - <<'PY'
+import pandas as pd
+from src.models.upi import score_upi_frame
+
+df = pd.read_csv("data/raw/final_base_with_upi_corrected.csv", nrows=5)
+print(score_upi_frame(df).to_string(index=False))
+PY
+```
+
+Important UPI modeling notes:
+
+- The current UPI flow uses internal feature engineering plus XGBoost `scale_pos_weight` for class imbalance.
+- It does not currently write SMOTE-resampled files into `data/processed`.
+- It drops `SK_ID_CURR`, `TARGET`, `SK_ID_PREV`, and known empty source columns before modeling.
+- It converts `DAYS_EMPLOYED = 365243` into a `DAYS_EMPLOYED_ANOM` flag and removes that value as a real duration.
+- It treats `XNA` as `Unknown`.
+- If UPI metrics are extremely high, especially ROC-AUC near `0.99`, treat that as a leakage warning. Check whether UPI features were generated from `TARGET`, include post-default behavior, or were created with target-aware synthetic logic.
+
+**Module 4: fairness audit + explainability/eval plots**
+
+```bash
+venv/bin/python -m src.fairness_audit
+```
+
+Check the outputs:
+
+```bash
+venv/bin/python - <<'PY'
+import joblib
+
+print("fairness_audit_passed:", joblib.load("artifacts/model_fairness_audit_passed.joblib"))
+PY
+
+ls notebooks/fairness_plots
+ls notebooks/shap_plots
+ls notebooks/eval_plots
+```
+
+Expected current state in this repo: fairness still ends up `False`.
+
+---
+
+**3. Start The API And Score Requests**
+
+Open a second terminal window in the repo root and set the same env vars:
+
+```bash
+cd /Users/swanandkalekar/Desktop/AI_CreditScoring
+export DATA_RAW_DIR="data/raw/"
+export DATA_PROCESSED_DIR="data/processed/"
+export ARTIFACT_DIR="artifacts/"
+export EDA_PLOTS_DIR="notebooks/eda_plots/"
+export SHAP_PLOTS_DIR="notebooks/shap_plots/"
+export FAIRNESS_PLOTS_DIR="notebooks/fairness_plots/"
+export EVAL_PLOTS_DIR="notebooks/eval_plots/"
+```
+
+Start the real API:
+
+```bash
+venv/bin/python -c "from src.api.app import create_app; app = create_app(artifact_dir='artifacts', processed_dir='data/processed', mock_mode=False, strict_artifacts=True); app.run(host='127.0.0.1', port=5000)"
+```
+
+In a third terminal, check health:
+
+```bash
+curl http://127.0.0.1:5000/health
+```
+
+Generate one valid REDUCED payload and one valid FULL payload:
+
+```bash
+venv/bin/python - <<'PY'
+import json
+from src.api import AGG_REQUIRED_FIELDS
+
+application = {
+    "AMT_INCOME_TOTAL_CAPPED": 120000.0,
+    "AMT_CREDIT": 250000.0,
+    "AMT_ANNUITY": 25000.0,
+    "AMT_GOODS_PRICE": 220000.0,
+    "DAYS_BIRTH": -12000.0,
+    "DAYS_EMPLOYED": -1500.0,
+    "DAYS_REGISTRATION": -3000.0,
+    "DAYS_ID_PUBLISH": -2000.0,
+    "DAYS_LAST_PHONE_CHANGE": -1000.0,
+    "REGION_POPULATION_RELATIVE": 0.02,
+    "EXT_SOURCE_1": 0.2,
+    "EXT_SOURCE_2": 0.4,
+    "EXT_SOURCE_3": 0.6,
+    "CNT_FAM_MEMBERS": 2.0,
+    "OWN_CAR_AGE": 5.0,
+    "OBS_30_CNT_SOCIAL_CIRCLE": 1.0,
+    "DEF_30_CNT_SOCIAL_CIRCLE": 0.0,
+    "OBS_60_CNT_SOCIAL_CIRCLE": 1.0,
+    "DEF_60_CNT_SOCIAL_CIRCLE": 0.0,
+    "AMT_REQ_CREDIT_BUREAU_HOUR": 0.0,
+    "AMT_REQ_CREDIT_BUREAU_DAY": 0.0,
+    "AMT_REQ_CREDIT_BUREAU_WEEK": 1.0,
+    "AMT_REQ_CREDIT_BUREAU_MON": 1.0,
+    "AMT_REQ_CREDIT_BUREAU_QRT": 0.0,
+    "AMT_REQ_CREDIT_BUREAU_YEAR": 1.0,
+    "NAME_CONTRACT_TYPE": "Cash loans",
+    "NAME_TYPE_SUITE": "Unaccompanied",
+    "NAME_EDUCATION_TYPE": "Higher education",
+    "NAME_FAMILY_STATUS": "Married",
+    "OCCUPATION_TYPE": "Laborers",
+    "ORGANIZATION_TYPE": "Business Entity Type 3",
+    "WEEKDAY_APPR_PROCESS_START": "MONDAY",
+    "DAYS_EMPLOYED_ANOM": 0,
+}
+
+reduced_payload = {"application": application}
+full_payload = {"application": application}
+for section_name, fields in AGG_REQUIRED_FIELDS.items():
+    full_payload[section_name] = {
+        field: float(index + 1) for index, field in enumerate(fields)
+    }
+
+with open("reduced_payload.json", "w", encoding="utf-8") as f:
+    json.dump(reduced_payload, f, indent=2)
+
+with open("full_payload.json", "w", encoding="utf-8") as f:
+    json.dump(full_payload, f, indent=2)
+
+print("Wrote reduced_payload.json and full_payload.json")
+PY
+```
+
+Score REDUCED:
+
+```bash
+curl -X POST http://127.0.0.1:5000/score \
+  -H "Content-Type: application/json" \
+  --data-binary @reduced_payload.json
+```
+
+Score FULL:
+
+```bash
+curl -X POST http://127.0.0.1:5000/score \
+  -H "Content-Type: application/json" \
+  --data-binary @full_payload.json
+```
+
+What you should see:
+
+- `/health` returns `status: ok`
+- `/health.model_version` is `full_weighted_blend_v2.2.0`
+- REDUCED `/score` returns `coverage_tier: REDUCED`
+- FULL `/score` returns `coverage_tier: FULL`
+- REDUCED version is `reduced_v2.1.0`
+- FULL version is `full_weighted_blend_v2.2.0`
+
+Stop the API with `Ctrl+C`.
+
+---
+
+**4. Full Test Commands**
+
+Run the full suite:
+
+```bash
+venv/bin/python -m pytest tests -q
+```
+
+Useful targeted runs:
+
+```bash
+venv/bin/python -m pytest tests/test_api.py -q
+venv/bin/python -m pytest tests/test_m2_m4_integration.py -q
+venv/bin/python -m pytest tests/test_m3_blending.py -q
+venv/bin/python -m pytest tests/test_subgroup_calibration.py -q
+```
+
+---
+
+**5. Minimal End-To-End Sequence**
+
+If you just want the shortest real pipeline command chain:
+
+```bash
+cd /Users/swanandkalekar/Desktop/AI_CreditScoring
+export DATA_RAW_DIR="data/raw/"
+export DATA_PROCESSED_DIR="data/processed/"
+export ARTIFACT_DIR="artifacts/"
+export EDA_PLOTS_DIR="notebooks/eda_plots/"
+export SHAP_PLOTS_DIR="notebooks/shap_plots/"
+export FAIRNESS_PLOTS_DIR="notebooks/fairness_plots/"
+export EVAL_PLOTS_DIR="notebooks/eval_plots/"
+
+venv/bin/python -m src.data_pipeline
+venv/bin/python -m src.feature_engineering
+venv/bin/python -m src.models.train
+venv/bin/python -m src.models.upi
+venv/bin/python -m src.fairness_audit
+venv/bin/python -m pytest tests -q
+```
+
+The `src.models.upi` command is standalone. Skip it if you only want the original FULL/REDUCED pipeline.
