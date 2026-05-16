@@ -8,7 +8,7 @@ from typing import Any
 
 
 DEFAULT_DB_FILENAME = "mastermind_command_center.sqlite3"
-ALLOWED_TIER_TYPES = frozenset({"FULL", "REDUCED"})
+ALLOWED_TIER_TYPES = frozenset({"FULL", "REDUCED", "UPI"})
 ALLOWED_STATUS_VALUES = frozenset(
     {
         "DRAFT",

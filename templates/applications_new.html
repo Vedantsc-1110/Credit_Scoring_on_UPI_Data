@@ -1,10 +1,12 @@
 {% extends "base.html" %}
-{% from "partials/_application_form_macros.html" import render_section %}
+{% from "partials/_application_form_macros.html" import render_field, render_section %}
 
 {% block content %}
 {% set sections = ui_config.sections or [] %}
 {% set reduced_sample = ui_config.samplePayloads.REDUCED if ui_config.samplePayloads is defined else {} %}
 {% set full_sample = ui_config.samplePayloads.FULL if ui_config.samplePayloads is defined else {} %}
+{% set upi_sample = ui_config.samplePayloads.UPI if ui_config.samplePayloads is defined else {} %}
+{% set upi_section = ui_config.upiSection if ui_config.upiSection is defined else none %}
 
 <section class="section page-header">
     <div class="section-shell">
@@ -72,6 +74,9 @@
                             <div class="tier-selector portal-tier-selector" role="tablist" aria-label="Coverage tier">
                                 <button type="button" class="tier-toggle active" data-portal-tier-toggle data-tier="REDUCED" aria-selected="true">REDUCED</button>
                                 <button type="button" class="tier-toggle" data-portal-tier-toggle data-tier="FULL" aria-selected="false">FULL</button>
+                                {% if "UPI" in health_snapshot.coverage_tiers_available %}
+                                <button type="button" class="tier-toggle" data-portal-tier-toggle data-tier="UPI" aria-selected="false">UPI</button>
+                                {% endif %}
                             </div>
                             <p class="tier-description" id="portal-tier-description">Application-only intake. Best for fast submission when aggregate credit history is unavailable.</p>
                         </section>
@@ -97,6 +102,24 @@
                             </div>
                         </section>
 
+                        {% if upi_section and "UPI" in health_snapshot.coverage_tiers_available %}
+                        <section class="portal-section-card portal-upi-panel is-hidden" id="portal-upi-panel">
+                            <div class="portal-section-header">
+                                <div>
+                                    <p class="eyebrow">UPI Tier Signals</p>
+                                    <h2>Transaction behavior</h2>
+                                </div>
+                                <span class="portal-section-completion" id="portal-upi-summary">UPI fields hidden</span>
+                            </div>
+                            <p class="page-intro portal-inline-copy">UPI captures monthly cashflow, transaction reliability, volatility, and counterparty breadth for the standalone UPI model.</p>
+                            <div class="form-grid">
+                                {% for field in upi_section.fields %}
+                                {{ render_field(upi_section.name, field, upi_sample.get(upi_section.name, {}).get(field.name), optional=False) }}
+                                {% endfor %}
+                            </div>
+                        </section>
+                        {% endif %}
+
                         <section class="portal-section-card">
                             <div class="portal-section-header">
                                 <div>
@@ -118,6 +141,10 @@
                                 <div class="portal-readiness-item">
                                     <span class="portal-readiness-label">FULL Aggregate Defaults</span>
                                     <span class="portal-readiness-value" id="portal-defaults-status">Not active</span>
+                                </div>
+                                <div class="portal-readiness-item">
+                                    <span class="portal-readiness-label">UPI Signals</span>
+                                    <span class="portal-readiness-value" id="portal-upi-status">Not active</span>
                                 </div>
                             </div>
 
@@ -143,7 +170,7 @@
                 </div>
                 <div class="feature-block portal-sidecar-card">
                     <h3>Tier guidance</h3>
-                    <p>REDUCED requires the application section only. FULL adds bureau, previous applications, installments, POS cash, and credit card aggregates.</p>
+                    <p>REDUCED requires application fields only. FULL adds credit-history aggregates. UPI adds transaction behavior signals when the UPI runtime is available.</p>
                 </div>
             </aside>
         </div>

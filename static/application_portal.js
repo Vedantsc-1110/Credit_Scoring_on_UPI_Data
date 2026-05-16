@@ -12,6 +12,7 @@
         "pos_cash_agg",
         "credit_card_agg",
     ];
+    const UPI_SECTION = "upi_agg";
     const state = {
         tier: "REDUCED",
     };
@@ -71,13 +72,25 @@
         });
 
         $("portal-tier-input").value = nextTier;
+        const applicationCard = document.querySelector('[data-portal-section-card="application"]');
+        if (applicationCard) {
+            applicationCard.classList.toggle("is-hidden", nextTier === "UPI");
+        }
         $("portal-full-panel").classList.toggle("is-hidden", nextTier !== "FULL");
+        const upiPanel = $("portal-upi-panel");
+        if (upiPanel) {
+            upiPanel.classList.toggle("is-hidden", nextTier !== "UPI");
+        }
         $("portal-tier-description").textContent = nextTier === "FULL"
             ? "Application fields plus five optional aggregate families. Blank aggregate values are saved as explicit zeros."
-            : "Application-only intake. Best for fast submission when aggregate credit history is unavailable.";
+            : nextTier === "UPI"
+                ? "UPI transaction behavior only for applicants without fixed-income application fields."
+                : "Application-only intake. Best for fast submission when aggregate credit history is unavailable.";
         $("portal-tier-hint").textContent = nextTier === "FULL"
             ? "FULL selected. Aggregate drawers are now available."
-            : "REDUCED selected by default";
+            : nextTier === "UPI"
+                ? "UPI selected. Only transaction signals are required."
+                : "REDUCED selected by default";
 
         refreshPortalState();
     }
@@ -96,17 +109,21 @@
         const missing = [];
         const aggregateDefaults = [];
 
-        payload.application = payload.application || {};
-        sectionFields("application").forEach((field) => {
-            const value = valueFromControl(field);
-            const valid = value !== null && value !== "";
-            markFieldValidity(field, valid);
-            if (!valid) {
-                missing.push(field);
-                return;
-            }
-            payload.application[field.name] = value;
-        });
+        if (state.tier !== "UPI") {
+            payload.application = payload.application || {};
+            sectionFields("application").forEach((field) => {
+                const value = valueFromControl(field);
+                const valid = value !== null && value !== "";
+                markFieldValidity(field, valid);
+                if (!valid) {
+                    missing.push(field);
+                    return;
+                }
+                payload.application[field.name] = value;
+            });
+        } else {
+            delete payload.application;
+        }
 
         if (state.tier === "FULL") {
             FULL_OPTIONAL_SECTIONS.forEach((sectionName) => {
@@ -122,6 +139,20 @@
                     payload[sectionName][field.name] = value;
                     markFieldValidity(field, true);
                 });
+            });
+        }
+
+        if (state.tier === "UPI") {
+            payload[UPI_SECTION] = payload[UPI_SECTION] || {};
+            sectionFields(UPI_SECTION).forEach((field) => {
+                const value = valueFromControl(field);
+                const valid = value !== null && value !== "";
+                markFieldValidity(field, valid);
+                if (!valid) {
+                    missing.push(field);
+                    return;
+                }
+                payload[UPI_SECTION][field.name] = value;
             });
         }
 
@@ -141,9 +172,15 @@
         $("portal-meta-status").textContent = metaComplete ? "Ready" : "Incomplete";
 
         const applicationFields = sectionFields("application");
-        const applicationFilled = applicationFields.filter((field) => valueFromControl(field) !== null).length;
-        $("portal-application-completion").textContent = `${applicationFilled}/${applicationFields.length} required fields complete`;
-        $("portal-application-status").textContent = applicationFilled === applicationFields.length ? "Ready" : "Incomplete";
+        const applicationFilled = state.tier === "UPI"
+            ? applicationFields.length
+            : applicationFields.filter((field) => valueFromControl(field) !== null).length;
+        $("portal-application-completion").textContent = state.tier === "UPI"
+            ? "Application fields not required for UPI"
+            : `${applicationFilled}/${applicationFields.length} required fields complete`;
+        $("portal-application-status").textContent = state.tier === "UPI"
+            ? "Not active"
+            : applicationFilled === applicationFields.length ? "Ready" : "Incomplete";
 
         if (state.tier === "FULL") {
             let totalDefaults = 0;
@@ -172,7 +209,22 @@
             $("portal-defaults-status").textContent = "Not active";
         }
 
-        const formReady = metaComplete && applicationFilled === applicationFields.length;
+        const upiFields = sectionFields(UPI_SECTION);
+        const upiStatus = $("portal-upi-status");
+        const upiSummary = $("portal-upi-summary");
+        if (upiFields.length > 0 && upiStatus && upiSummary) {
+            const filled = upiFields.filter((field) => valueFromControl(field) !== null).length;
+            if (state.tier === "UPI") {
+                upiSummary.textContent = `${filled}/${upiFields.length} UPI fields complete`;
+                upiStatus.textContent = filled === upiFields.length ? "Ready" : "Incomplete";
+            } else {
+                upiSummary.textContent = "UPI fields hidden";
+                upiStatus.textContent = "Not active";
+            }
+        }
+
+        const upiReady = state.tier !== "UPI" || upiFields.every((field) => valueFromControl(field) !== null);
+        const formReady = metaComplete && applicationFilled === applicationFields.length && upiReady;
         $("portal-readiness-pill").textContent = formReady
             ? "Ready to save"
             : "Complete required items";

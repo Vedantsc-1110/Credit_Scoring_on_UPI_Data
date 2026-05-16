@@ -1,9 +1,10 @@
 {% extends "base.html" %}
-{% from "partials/_application_form_macros.html" import render_section %}
+{% from "partials/_application_form_macros.html" import render_field, render_section %}
 
 {% block content %}
 {% set payload = application.application_payload_obj or {} %}
 {% set sections = ui_config.sections or [] %}
+{% set upi_section = ui_config.upiSection if ui_config.upiSection is defined else none %}
 
 <section class="section page-header">
     <div class="section-shell">
@@ -104,6 +105,9 @@
                             <div class="tier-selector portal-tier-selector" role="tablist" aria-label="Coverage tier">
                                 <button type="button" class="tier-toggle{% if application.tier_type == 'REDUCED' %} active{% endif %}" data-analyst-tier-toggle data-tier="REDUCED" aria-selected="{{ 'true' if application.tier_type == 'REDUCED' else 'false' }}">REDUCED</button>
                                 <button type="button" class="tier-toggle{% if application.tier_type == 'FULL' %} active{% endif %}" data-analyst-tier-toggle data-tier="FULL" aria-selected="{{ 'true' if application.tier_type == 'FULL' else 'false' }}">FULL</button>
+                                {% if "UPI" in health_snapshot.coverage_tiers_available %}
+                                <button type="button" class="tier-toggle{% if application.tier_type == 'UPI' %} active{% endif %}" data-analyst-tier-toggle data-tier="UPI" aria-selected="{{ 'true' if application.tier_type == 'UPI' else 'false' }}">UPI</button>
+                                {% endif %}
                             </div>
                             <p class="tier-description" id="analyst-tier-description"></p>
                         </section>
@@ -129,6 +133,24 @@
                             </div>
                         </section>
 
+                        {% if upi_section and "UPI" in health_snapshot.coverage_tiers_available %}
+                        <section class="portal-section-card portal-upi-panel{% if application.tier_type != 'UPI' %} is-hidden{% endif %}" id="analyst-upi-panel">
+                            <div class="portal-section-header">
+                                <div>
+                                    <p class="eyebrow">UPI Tier Signals</p>
+                                    <h2>Transaction behavior</h2>
+                                </div>
+                                <span class="portal-section-completion" id="analyst-upi-summary">Evaluating UPI coverage</span>
+                            </div>
+                            <p class="page-intro portal-inline-copy">UPI fields are required for UPI-tier scoring and are highlighted when edited.</p>
+                            <div class="form-grid">
+                                {% for field in upi_section.fields %}
+                                {{ render_field(upi_section.name, field, payload.get(upi_section.name, {}).get(field.name), optional=False) }}
+                                {% endfor %}
+                            </div>
+                        </section>
+                        {% endif %}
+
                         <section class="portal-section-card">
                             <div class="portal-section-header">
                                 <div>
@@ -150,6 +172,10 @@
                                 <div class="portal-readiness-item">
                                     <span class="portal-readiness-label">FULL Defaults</span>
                                     <span class="portal-readiness-value" id="analyst-defaults-status">Not active</span>
+                                </div>
+                                <div class="portal-readiness-item">
+                                    <span class="portal-readiness-label">UPI Signals</span>
+                                    <span class="portal-readiness-value" id="analyst-upi-status">Not active</span>
                                 </div>
                             </div>
 

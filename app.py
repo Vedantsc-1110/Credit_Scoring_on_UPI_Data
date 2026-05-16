@@ -158,6 +158,55 @@ WHAT_IF_FIELD_SPECS = (
         "min": "0",
         "control": "number",
     },
+    {
+        "section": "upi_agg",
+        "name": "monthly_inflow",
+        "label": "UPI Monthly Inflow",
+        "step": "1000",
+        "min": "0",
+        "max": "300000",
+        "control": "slider",
+        "value_kind": "amount",
+        "decimals": 0,
+    },
+    {
+        "section": "upi_agg",
+        "name": "monthly_outflow",
+        "label": "UPI Monthly Outflow",
+        "step": "1000",
+        "min": "0",
+        "max": "300000",
+        "control": "slider",
+        "value_kind": "amount",
+        "decimals": 0,
+    },
+    {
+        "section": "upi_agg",
+        "name": "failed_txn_count",
+        "label": "Failed UPI Transactions",
+        "step": "1",
+        "min": "0",
+        "control": "number",
+    },
+    {
+        "section": "upi_agg",
+        "name": "failed_due_to_low_balance",
+        "label": "Low Balance Failures",
+        "step": "1",
+        "min": "0",
+        "control": "number",
+    },
+    {
+        "section": "upi_agg",
+        "name": "balance_instability_score",
+        "label": "Balance Instability Score",
+        "step": "0.01",
+        "min": "0",
+        "max": "1",
+        "control": "slider",
+        "value_kind": "ratio",
+        "decimals": 2,
+    },
 )
 
 
@@ -645,7 +694,19 @@ def _build_application_snapshot(payload: dict[str, Any]) -> list[dict[str, str]]
 
 
 def _build_aggregate_snapshot(payload: dict[str, Any], tier_type: str) -> list[dict[str, str]]:
-    if str(tier_type).upper() != "FULL":
+    normalized_tier = str(tier_type).upper()
+    if normalized_tier == "UPI":
+        upi = payload.get("upi_agg", {}) if isinstance(payload.get("upi_agg"), dict) else {}
+        rows = [
+            ("Monthly Inflow", upi.get("monthly_inflow")),
+            ("Monthly Outflow", upi.get("monthly_outflow")),
+            ("Failed Transactions", upi.get("failed_txn_count")),
+            ("Low Balance Failures", upi.get("failed_due_to_low_balance")),
+            ("Active Days", upi.get("active_days")),
+            ("Distinct Counterparties", upi.get("distinct_counterparties")),
+        ]
+        return [{"label": label, "value": _format_scalar_snapshot(value)} for label, value in rows]
+    if normalized_tier != "FULL":
         return [{"label": "Aggregate Coverage", "value": "Application-only REDUCED payload"}]
 
     rows: list[dict[str, str]] = []
@@ -976,8 +1037,13 @@ def _clone_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _build_simulator_fields(payload: dict[str, Any], tier_type: str) -> list[dict[str, Any]]:
     fields: list[dict[str, Any]] = []
+    normalized_tier = str(tier_type).upper()
     for spec in WHAT_IF_FIELD_SPECS:
-        if str(tier_type).upper() != "FULL" and spec["section"] != "application":
+        if normalized_tier == "REDUCED" and spec["section"] != "application":
+            continue
+        if normalized_tier == "FULL" and spec["section"] == "upi_agg":
+            continue
+        if normalized_tier == "UPI" and spec["section"] != "upi_agg":
             continue
         section = payload.get(spec["section"], {}) if isinstance(payload.get(spec["section"]), dict) else {}
         value = section.get(spec["name"])
@@ -1122,6 +1188,7 @@ def _seed_demo_applications_if_empty(app: Flask) -> None:
         return
 
     seed_payload = _build_demo_seed_payload()
+    full_seed_payload = {key: value for key, value in seed_payload.items() if key != "upi_agg"}
     seed_rows = [
         {
             "applicant_name": "Avery Cole",
@@ -1135,7 +1202,16 @@ def _seed_demo_applications_if_empty(app: Flask) -> None:
             "sk_id_curr": 910001002,
             "tier_type": "FULL",
             "current_status": "READY_FOR_REVIEW",
-            "application_payload_json": seed_payload,
+            "application_payload_json": full_seed_payload,
+        },
+        {
+            "applicant_name": "Nisha Rao",
+            "sk_id_curr": 910001005,
+            "tier_type": "UPI",
+            "current_status": "READY_FOR_REVIEW",
+            "application_payload_json": {
+                "upi_agg": seed_payload["upi_agg"],
+            },
         },
         {
             "applicant_name": "Jordan Blake",
@@ -1157,7 +1233,7 @@ def _seed_demo_applications_if_empty(app: Flask) -> None:
             "tier_type": "FULL",
             "current_status": "READY_FOR_REVIEW",
             "application_payload_json": {
-                **seed_payload,
+                **full_seed_payload,
                 "application": {
                     **seed_payload["application"],
                     "AMT_INCOME_TOTAL_CAPPED": 150000.0,
@@ -1169,7 +1245,7 @@ def _seed_demo_applications_if_empty(app: Flask) -> None:
 
     created_rows = [create_application(db_path, **row) for row in seed_rows]
 
-    for seeded_id in (created_rows[1]["id"], created_rows[3]["id"]):
+    for seeded_id in (created_rows[1]["id"], created_rows[2]["id"], created_rows[4]["id"]):
         try:
             _analyze_saved_application(app, seeded_id)
         except Exception:

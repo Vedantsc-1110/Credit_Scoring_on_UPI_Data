@@ -85,6 +85,27 @@
             "CC_DRAWINGS_ATM_SUM",
             "CC_DRAWINGS_CURRENT_SUM",
         ],
+        upi_agg: [
+            "balance_instability_score",
+            "failed_due_to_low_balance",
+            "failed_txn_count",
+            "outflow_volatility",
+            "inflow_volatility",
+            "txn_value_std",
+            "monthly_inflow",
+            "monthly_outflow",
+            "success_txn_count",
+            "monthly_txn_count",
+            "avg_txn_value",
+            "median_txn_value",
+            "inflow_txn_count",
+            "outflow_txn_count",
+            "weekday_txn_ratio",
+            "weekend_txn_ratio",
+            "distinct_counterparties",
+            "active_days",
+            "peak_txn_day_count",
+        ],
     };
 
     function cloneValue(value) {
@@ -153,11 +174,23 @@
         });
 
         const isFull = nextTier === "FULL";
+        const isUpi = nextTier === "UPI";
+        if (elements.applicationFields) {
+            elements.applicationFields.classList.toggle("is-hidden", isUpi);
+        }
         elements.bureauFields.classList.toggle("is-visible", isFull);
         elements.bureauDivider.classList.toggle("is-visible", isFull);
+        if (elements.upiFields) {
+            elements.upiFields.classList.toggle("is-visible", isUpi);
+        }
+        if (elements.upiDivider) {
+            elements.upiDivider.classList.toggle("is-visible", isUpi);
+        }
         elements.tierDescription.textContent = isFull
             ? "33 application fields + all 5 aggregate sections - full pipeline coverage"
-            : "33 fields - application section only";
+            : isUpi
+                ? "33 application fields + UPI transaction signals - standalone UPI model"
+                : "33 fields - application section only";
 
         elements.resultSection.classList.add("is-hidden");
         elements.formStage.classList.remove("is-hidden");
@@ -189,7 +222,9 @@
         const payload = cloneValue((config.samplePayloads || {})[state.tier] || {});
         const sections = state.tier === "FULL"
             ? ["application", "bureau_agg", "previous_agg", "installments_agg", "pos_cash_agg", "credit_card_agg"]
-            : ["application"];
+            : state.tier === "UPI"
+                ? ["upi_agg"]
+                : ["application"];
         const missing = [];
 
         if (state.tier === "FULL") {
@@ -201,6 +236,9 @@
                         payload[sectionName][fieldName] = 0;
                     });
                 });
+        }
+        if (state.tier === "UPI") {
+            payload.upi_agg = payload.upi_agg || {};
         }
 
         sections.forEach((sectionName) => {
@@ -215,8 +253,10 @@
                 if (value === null || value === "") {
                     if (sectionName === "application") {
                         missing.push(control);
-                    } else {
+                    } else if (state.tier === "FULL") {
                         payload[sectionName][fieldName] = 0;
+                    } else {
+                        missing.push(control);
                     }
                     return;
                 }
@@ -342,8 +382,11 @@
         const elements = {
             tierButtons: Array.from(document.querySelectorAll("[data-tier-toggle]")),
             tierDescription: document.getElementById("tier-description"),
+            applicationFields: document.getElementById("application-fields"),
             bureauFields: document.getElementById("bureau-fields"),
             bureauDivider: document.getElementById("bureau-divider"),
+            upiFields: document.getElementById("upi-fields"),
+            upiDivider: document.getElementById("upi-divider"),
             form: document.getElementById("analysis-form"),
             formStage: document.getElementById("analysis-form-stage"),
             loadingStage: document.getElementById("analysis-loading-stage"),

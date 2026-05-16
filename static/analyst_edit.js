@@ -16,6 +16,7 @@
         "pos_cash_agg",
         "credit_card_agg",
     ];
+    const UPI_SECTION = "upi_agg";
     const state = {
         tier: document.getElementById("analyst-tier-input")?.value || "REDUCED",
     };
@@ -67,11 +68,21 @@
             button.classList.toggle("active", active);
             button.setAttribute("aria-selected", active ? "true" : "false");
         });
+        const applicationCard = document.querySelector('[data-portal-section-card="application"]');
+        if (applicationCard) {
+            applicationCard.classList.toggle("is-hidden", nextTier === "UPI");
+        }
         $("analyst-full-panel").classList.toggle("is-hidden", nextTier !== "FULL");
+        const upiPanel = $("analyst-upi-panel");
+        if (upiPanel) {
+            upiPanel.classList.toggle("is-hidden", nextTier !== "UPI");
+        }
         $("analyst-tier-hint").textContent = `${nextTier} currently selected`;
         $("analyst-tier-description").textContent = nextTier === "FULL"
             ? "FULL preserves the full payload contract and keeps omitted aggregate fields as explicit 0 values."
-            : "REDUCED preserves the application-only payload contract with required borrower fields only.";
+            : nextTier === "UPI"
+                ? "UPI uses transaction signals only for applicants without fixed-income application fields."
+                : "REDUCED preserves the application-only payload contract with required borrower fields only.";
         refreshState();
     }
 
@@ -85,19 +96,23 @@
         const changes = [];
         const aggregateDefaults = [];
 
-        sectionFields("application").forEach((field) => {
-            const value = valueFromControl(field);
-            const valid = value !== null;
-            markValidity(field, valid);
-            if (!valid) {
-                missing.push(field);
-                return;
-            }
-            payload.application[field.name] = value;
-            if (fieldChanged(field)) {
-                changes.push(field.dataset.fieldPath || field.name);
-            }
-        });
+        if (state.tier !== "UPI") {
+            sectionFields("application").forEach((field) => {
+                const value = valueFromControl(field);
+                const valid = value !== null;
+                markValidity(field, valid);
+                if (!valid) {
+                    missing.push(field);
+                    return;
+                }
+                payload.application[field.name] = value;
+                if (fieldChanged(field)) {
+                    changes.push(field.dataset.fieldPath || field.name);
+                }
+            });
+        } else {
+            delete payload.application;
+        }
 
         if (state.tier === "FULL") {
             FULL_OPTIONAL_SECTIONS.forEach((sectionName) => {
@@ -115,6 +130,23 @@
                     }
                     markValidity(field, true);
                 });
+            });
+        }
+
+        if (state.tier === "UPI") {
+            payload[UPI_SECTION] = {};
+            sectionFields(UPI_SECTION).forEach((field) => {
+                const value = valueFromControl(field);
+                const valid = value !== null;
+                markValidity(field, valid);
+                if (!valid) {
+                    missing.push(field);
+                    return;
+                }
+                payload[UPI_SECTION][field.name] = value;
+                if (fieldChanged(field)) {
+                    changes.push(field.dataset.fieldPath || field.name);
+                }
             });
         }
 
@@ -156,8 +188,12 @@
         $("analyst-modified-count").textContent = String(modifiedCount);
 
         const applicationFields = sectionFields("application");
-        const completeCount = applicationFields.filter((field) => valueFromControl(field) !== null).length;
-        $("analyst-application-completion").textContent = `${completeCount}/${applicationFields.length} required fields complete`;
+        const completeCount = state.tier === "UPI"
+            ? applicationFields.length
+            : applicationFields.filter((field) => valueFromControl(field) !== null).length;
+        $("analyst-application-completion").textContent = state.tier === "UPI"
+            ? "Application fields not required for UPI"
+            : `${completeCount}/${applicationFields.length} required fields complete`;
 
         if (state.tier === "FULL") {
             let totalDefaults = 0;
@@ -174,8 +210,24 @@
             $("analyst-full-summary").textContent = `${totalDefaults} aggregate fields currently default to 0`;
             $("analyst-defaults-status").textContent = totalDefaults > 0 ? `${totalDefaults} defaults active` : "All aggregate fields supplied";
         } else {
-            $("analyst-full-summary").textContent = "FULL aggregates hidden in REDUCED mode";
+            $("analyst-full-summary").textContent = state.tier === "UPI"
+                ? "FULL aggregates hidden in UPI mode"
+                : "FULL aggregates hidden in REDUCED mode";
             $("analyst-defaults-status").textContent = "Not active";
+        }
+
+        const upiFields = sectionFields(UPI_SECTION);
+        const upiSummary = $("analyst-upi-summary");
+        const upiStatus = $("analyst-upi-status");
+        if (upiFields.length > 0 && upiSummary && upiStatus) {
+            const filled = upiFields.filter((field) => valueFromControl(field) !== null).length;
+            if (state.tier === "UPI") {
+                upiSummary.textContent = `${filled}/${upiFields.length} UPI fields complete`;
+                upiStatus.textContent = filled === upiFields.length ? "Ready" : "Incomplete";
+            } else {
+                upiSummary.textContent = "UPI fields hidden outside UPI mode";
+                upiStatus.textContent = "Not active";
+            }
         }
 
         const changeList = $("analyst-change-list");

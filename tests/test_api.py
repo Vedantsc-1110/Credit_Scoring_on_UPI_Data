@@ -14,6 +14,7 @@ from src.models.runtime_support import WeightedBlendModel, WeightedBlendShapExpl
 from src.api import (
     AGG_REQUIRED_FIELDS,
     APPLICATION_REQUIRED_FIELDS,
+    UPI_REQUIRED_FIELDS,
     build_input_df,
     create_app,
     determine_coverage_tier,
@@ -68,6 +69,14 @@ def _make_full_payload() -> dict[str, dict[str, object]]:
             field: float(index + 1) for index, field in enumerate(fields)
         }
     return payload
+
+
+def _make_upi_payload() -> dict[str, dict[str, object]]:
+    return {
+        "upi_agg": {
+            field: float(index + 1) for index, field in enumerate(UPI_REQUIRED_FIELDS)
+        },
+    }
 
 
 class SavedBuilderFixture:
@@ -267,7 +276,7 @@ def test_health_returns_required_fields():
         "coverage_tiers_available",
     }
     assert payload["status"] == "ok"
-    assert payload["coverage_tiers_available"] == ["FULL", "REDUCED"]
+    assert payload["coverage_tiers_available"] == ["FULL", "REDUCED", "UPI"]
 
 
 def test_demo_routes_render_frontend():
@@ -302,6 +311,17 @@ def test_score_valid_full_returns_200():
     payload = response.get_json()
     assert payload["coverage_tier"] == "FULL"
     assert payload["model_version"].startswith("full_v")
+
+
+def test_score_valid_upi_returns_200():
+    client = create_app(mock_mode=True).test_client()
+
+    response = client.post("/score", json=_make_upi_payload())
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["coverage_tier"] == "UPI"
+    assert payload["model_version"].startswith("upi_")
 
 
 def test_bad_json_returns_400():
@@ -391,6 +411,9 @@ def test_validate_payload_and_determine_coverage_tier_happy_paths():
     reduced = {"application": _make_application_payload()}
     assert determine_coverage_tier(reduced) == "REDUCED"
     assert validate_payload(reduced) == (None, [])
+    upi = _make_upi_payload()
+    assert determine_coverage_tier(upi) == "UPI"
+    assert validate_payload(upi) == (None, [])
 
 
 def test_validate_payload_rejects_unknown_top_level_keys():

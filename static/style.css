@@ -757,11 +757,13 @@ pre {
     border-top: 1px solid var(--line-panel);
 }
 
-.bureau-group {
+.bureau-group,
+.upi-group {
     display: none;
 }
 
 .bureau-group.is-visible,
+.upi-group.is-visible,
 .form-divider.is-visible {
     display: block;
 }

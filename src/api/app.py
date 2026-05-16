@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 import re
+import sys
 import tempfile
 from types import MappingProxyType, ModuleType
 from typing import Any, Mapping
@@ -171,7 +172,6 @@ AGG_REQUIRED_FIELDS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         ),
     }
 )
-ALLOWED_TOP_LEVEL_KEYS = frozenset(FULL_REQUIRED_SECTIONS)
 FULL_SECTION_ORDER: tuple[str, ...] = (
     "application",
     "bureau_agg",
@@ -182,6 +182,30 @@ FULL_SECTION_ORDER: tuple[str, ...] = (
 )
 FULL_ONLY_SECTION_ORDER: tuple[str, ...] = FULL_SECTION_ORDER[1:]
 FULL_ONLY_SECTIONS = frozenset(FULL_ONLY_SECTION_ORDER)
+UPI_SECTION = "upi_agg"
+UPI_SECTION_ORDER: tuple[str, ...] = (UPI_SECTION,)
+UPI_REQUIRED_FIELDS: tuple[str, ...] = (
+    "balance_instability_score",
+    "failed_due_to_low_balance",
+    "failed_txn_count",
+    "outflow_volatility",
+    "inflow_volatility",
+    "txn_value_std",
+    "monthly_inflow",
+    "monthly_outflow",
+    "success_txn_count",
+    "monthly_txn_count",
+    "avg_txn_value",
+    "median_txn_value",
+    "inflow_txn_count",
+    "outflow_txn_count",
+    "weekday_txn_ratio",
+    "weekend_txn_ratio",
+    "distinct_counterparties",
+    "active_days",
+    "peak_txn_day_count",
+)
+ALLOWED_TOP_LEVEL_KEYS = frozenset((*FULL_REQUIRED_SECTIONS, UPI_SECTION))
 
 ERROR_MESSAGES: Mapping[str, str] = MappingProxyType(
     {
@@ -191,7 +215,9 @@ ERROR_MESSAGES: Mapping[str, str] = MappingProxyType(
         "partial_full_payload_not_allowed": "Partial FULL payloads are not allowed.",
         "missing_application_fields": "Application payload is missing required fields.",
         "missing_aggregate_fields": "FULL payload is missing required aggregate fields.",
+        "missing_upi_fields": "UPI payload is missing required transaction fields.",
         "starter_not_supported_in_mvp": "Payload is not supported in MVP.",
+        "unsupported_tier": "Requested coverage tier is not available in this runtime.",
         "internal_error": "Scoring failed.",
     }
 )
@@ -212,6 +238,10 @@ class ApiRuntime:
     reduced_model: Any
     reduced_calibrator: Any
     reduced_shap_explainer: Any
+    upi_builder: Any | None
+    upi_model: Any | None
+    upi_calibrator: Any | None
+    upi_shap_explainer: Any | None
     model_fairness_audit_passed: bool
     health_model_version: str
     tier_model_versions: Mapping[str, str]
@@ -254,6 +284,16 @@ class _MockBuilder:
         ]
         if self.tier == "FULL":
             base_columns.extend(["mock_installments", "mock_pos", "mock_cc"])
+        if self.tier == "UPI":
+            base_columns.extend(
+                [
+                    "mock_monthly_inflow",
+                    "mock_monthly_outflow",
+                    "mock_failed_txn_ratio",
+                    "mock_low_balance_failures",
+                    "mock_cashflow_stability",
+                ]
+            )
         self.encoded_columns_ = base_columns
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -285,6 +325,34 @@ class _MockBuilder:
             out["mock_installments"] = _numeric_series(df, "INST_RECORD_COUNT")
             out["mock_pos"] = _numeric_series(df, "POS_RECORD_COUNT")
             out["mock_cc"] = _numeric_series(df, "CC_RECORD_COUNT")
+        if self.tier == "UPI":
+            monthly_inflow = _numeric_series(df, "monthly_inflow")
+            monthly_outflow = _numeric_series(df, "monthly_outflow")
+            monthly_txn = _numeric_series(df, "monthly_txn_count")
+            failed_txn = _numeric_series(df, "failed_txn_count")
+            low_balance = _numeric_series(df, "failed_due_to_low_balance")
+            volatility = (
+                _numeric_series(df, "inflow_volatility")
+                + _numeric_series(df, "outflow_volatility")
+                + _numeric_series(df, "txn_value_std")
+            ) / 3.0
+            with np.errstate(divide="ignore", invalid="ignore"):
+                failed_ratio = np.where(
+                    monthly_txn.to_numpy() > 0,
+                    failed_txn.to_numpy() / monthly_txn.to_numpy(),
+                    0.0,
+                )
+                stability = np.where(
+                    volatility.to_numpy() >= 0,
+                    (monthly_inflow.to_numpy() - monthly_outflow.to_numpy())
+                    / (1.0 + np.abs(volatility.to_numpy())),
+                    0.0,
+                )
+            out["mock_monthly_inflow"] = monthly_inflow.astype(float)
+            out["mock_monthly_outflow"] = monthly_outflow.astype(float)
+            out["mock_failed_txn_ratio"] = failed_ratio.astype(float)
+            out["mock_low_balance_failures"] = low_balance.astype(float)
+            out["mock_cashflow_stability"] = stability.astype(float)
         return out[self.encoded_columns_].astype(float)
 
 
@@ -419,9 +487,9 @@ def validate_payload(payload: dict) -> tuple[str | None, list[str]]:
         return "bad_request", []
 
     application = payload.get("application")
-    if application is None:
+    if application is None and set(payload) != {UPI_SECTION}:
         return "missing_application", ["application"]
-    if not isinstance(application, dict):
+    if application is not None and not isinstance(application, dict):
         return "bad_request", []
 
     for section_name, section_value in payload.items():
@@ -430,21 +498,23 @@ def validate_payload(payload: dict) -> tuple[str | None, list[str]]:
         if not _section_has_scalar_values(section_value):
             return "bad_request", []
 
-    if "CODE_GENDER" in application:
+    if isinstance(application, dict) and "CODE_GENDER" in application:
         return "forbidden_field_code_gender", []
 
     try:
         tier = determine_coverage_tier(payload)
     except ValueError:
+        if UPI_SECTION in payload and set(payload) not in ({UPI_SECTION}, {"application", UPI_SECTION}):
+            return "starter_not_supported_in_mvp", []
         if set(payload).intersection(FULL_ONLY_SECTIONS):
             missing_sections = sorted(set(FULL_SECTION_ORDER) - set(payload))
             return "partial_full_payload_not_allowed", missing_sections
         return "starter_not_supported_in_mvp", []
 
     missing_application_fields = sorted(
-        field for field in APPLICATION_REQUIRED_FIELDS if field not in application
+        field for field in APPLICATION_REQUIRED_FIELDS if field not in (application or {})
     )
-    if missing_application_fields:
+    if tier != "UPI" and missing_application_fields:
         return "missing_application_fields", missing_application_fields
 
     if tier == "FULL":
@@ -460,6 +530,14 @@ def validate_payload(payload: dict) -> tuple[str | None, list[str]]:
         if missing_aggregate_fields:
             return "missing_aggregate_fields", sorted(missing_aggregate_fields)
 
+    if tier == "UPI":
+        upi_section = payload.get(UPI_SECTION)
+        if not isinstance(upi_section, dict):
+            return "bad_request", []
+        missing_upi_fields = sorted(field for field in UPI_REQUIRED_FIELDS if field not in upi_section)
+        if missing_upi_fields:
+            return "missing_upi_fields", [f"{UPI_SECTION}.{field}" for field in missing_upi_fields]
+
     return None, []
 
 
@@ -468,15 +546,19 @@ def determine_coverage_tier(payload: dict) -> str:
 
     if not isinstance(payload, dict):
         raise ValueError("payload must be a dict")
-    if "application" not in payload or payload.get("application") is None:
+    if "application" not in payload and UPI_SECTION not in payload:
         raise ValueError("application is required")
 
     top_keys = set(payload)
+    if top_keys == {UPI_SECTION}:
+        return "UPI"
     if top_keys == {"application"}:
         return "REDUCED"
+    if top_keys == {"application", UPI_SECTION}:
+        return "UPI"
     if top_keys == set(FULL_SECTION_ORDER):
         return "FULL"
-    if top_keys.intersection(FULL_ONLY_SECTIONS):
+    if top_keys.intersection(FULL_ONLY_SECTIONS) or UPI_SECTION in top_keys:
         raise ValueError("partial full payload")
     raise ValueError("unsupported starter payload")
 
@@ -485,11 +567,16 @@ def build_input_df(payload: dict, tier: str) -> pd.DataFrame:
     """Flatten a valid request payload into a one-row DataFrame."""
 
     tier = tier.upper()
-    if tier not in {"FULL", "REDUCED"}:
-        raise ValueError("tier must be FULL or REDUCED")
+    if tier not in {"FULL", "REDUCED", "UPI"}:
+        raise ValueError("tier must be FULL, REDUCED, or UPI")
 
     flattened: dict[str, Any] = {}
-    section_names = ("application",) if tier == "REDUCED" else FULL_SECTION_ORDER
+    if tier == "REDUCED":
+        section_names = ("application",)
+    elif tier == "UPI":
+        section_names = tuple(section for section in ("application", UPI_SECTION) if section in payload)
+    else:
+        section_names = FULL_SECTION_ORDER
 
     for section_name in section_names:
         section = payload.get(section_name)
@@ -505,7 +592,42 @@ def build_input_df(payload: dict, tier: str) -> pd.DataFrame:
                 raise _api_error("bad_request")
             flattened[field_name] = field_value
 
+    if tier == "UPI":
+        _add_upi_alias_fields(flattened)
+
     return pd.DataFrame([flattened])
+
+
+def _add_upi_alias_fields(flattened: dict[str, Any]) -> None:
+    alias_pairs = (
+        ("AMT_INCOME_TOTAL", "AMT_INCOME_TOTAL_CAPPED"),
+        ("AMT_CREDIT_x", "AMT_CREDIT"),
+        ("AMT_APPLICATION", "AMT_GOODS_PRICE"),
+        ("AMT_CREDIT_y", "AMT_CREDIT"),
+        ("bureau_loan_count", "BUREAU_LOAN_COUNT"),
+        ("prev_app_count", "PREV_APP_COUNT"),
+    )
+    for target_field, source_field in alias_pairs:
+        if target_field not in flattened and source_field in flattened:
+            flattened[target_field] = flattened[source_field]
+
+    income = _coerce_float(flattened.get("AMT_INCOME_TOTAL"))
+    credit = _coerce_float(flattened.get("AMT_CREDIT_x"))
+    annuity = _coerce_float(flattened.get("AMT_ANNUITY"))
+    if "debt_to_income" not in flattened and income and credit is not None:
+        flattened["debt_to_income"] = credit / income
+    if "payment_ratio" not in flattened and income and annuity is not None:
+        flattened["payment_ratio"] = annuity / income
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(numeric):
+        return None
+    return numeric
 
 
 def score_request(payload: dict, runtime: ApiRuntime, mock_mode: bool = False) -> dict:
@@ -516,6 +638,8 @@ def score_request(payload: dict, runtime: ApiRuntime, mock_mode: bool = False) -
         raise _api_error(error_code, missing_fields)
 
     tier = determine_coverage_tier(payload)
+    if tier not in runtime.coverage_tiers_available:
+        raise _api_error("unsupported_tier")
     input_df = build_input_df(payload, tier)
     builder, model, calibrator, explainer = _get_tier_runtime_components(runtime, tier)
 
@@ -581,6 +705,10 @@ def _build_mock_runtime(artifact_dir: str, processed_dir: str) -> ApiRuntime:
     reduced_model = _MockModel(len(reduced_builder.encoded_columns_))
     reduced_calibrator = _MockCalibrator()
     reduced_explainer = _MockExplainer()
+    upi_builder = _MockBuilder("UPI")
+    upi_model = _MockModel(len(upi_builder.encoded_columns_))
+    upi_calibrator = _MockCalibrator()
+    upi_explainer = _MockExplainer()
 
     processed_manifest = MappingProxyType(
         {
@@ -593,6 +721,7 @@ def _build_mock_runtime(artifact_dir: str, processed_dir: str) -> ApiRuntime:
         {
             "FULL": _build_composite_model_version("FULL"),
             "REDUCED": _build_composite_model_version("REDUCED"),
+            "UPI": _build_composite_model_version("UPI"),
         }
     )
 
@@ -608,10 +737,14 @@ def _build_mock_runtime(artifact_dir: str, processed_dir: str) -> ApiRuntime:
         reduced_model=reduced_model,
         reduced_calibrator=reduced_calibrator,
         reduced_shap_explainer=reduced_explainer,
+        upi_builder=upi_builder,
+        upi_model=upi_model,
+        upi_calibrator=upi_calibrator,
+        upi_shap_explainer=upi_explainer,
         model_fairness_audit_passed=False,
         health_model_version=health_model_version,
         tier_model_versions=tier_model_versions,
-        coverage_tiers_available=("FULL", "REDUCED"),
+        coverage_tiers_available=("FULL", "REDUCED", "UPI"),
         reproducibility_report=MappingProxyType({"mode": "mock"}),
         mock_mode=True,
     )
@@ -650,6 +783,7 @@ def _load_real_runtime(
         "reduced_shap_explainer.joblib",
         "REDUCED SHAP explainer",
     )
+    upi_components = _load_optional_upi_runtime_components(artifact_dir)
     fairness_result = _load_fairness_result(artifact_dir)
     reproducibility_report = _load_optional_json(artifact_dir, REPRODUCIBILITY_REPORT_FILENAME)
 
@@ -661,16 +795,26 @@ def _load_real_runtime(
         reduced_calibrator,
         reduced_explainer,
     )
+    if upi_components is not None:
+        _validate_tier_runtime(
+            "UPI",
+            upi_components["builder"],
+            upi_components["model"],
+            upi_components["calibrator"],
+            upi_components["explainer"],
+        )
     health_model_version = _resolve_health_model_version(
         reproducibility_report,
         fallback=_build_composite_model_version("FULL"),
     )
-    tier_model_versions = MappingProxyType(
-        {
-            "FULL": _resolve_tier_model_version(reproducibility_report, "FULL"),
-            "REDUCED": _resolve_tier_model_version(reproducibility_report, "REDUCED"),
-        }
-    )
+    tier_model_version_map = {
+        "FULL": _resolve_tier_model_version(reproducibility_report, "FULL"),
+        "REDUCED": _resolve_tier_model_version(reproducibility_report, "REDUCED"),
+    }
+    if upi_components is not None:
+        tier_model_version_map["UPI"] = upi_components["model_version"]
+    tier_model_versions = MappingProxyType(tier_model_version_map)
+    coverage_tiers = ("FULL", "REDUCED", "UPI") if upi_components is not None else ("FULL", "REDUCED")
 
     return ApiRuntime(
         artifact_dir=artifact_dir,
@@ -684,10 +828,14 @@ def _load_real_runtime(
         reduced_model=reduced_model,
         reduced_calibrator=reduced_calibrator,
         reduced_shap_explainer=reduced_explainer,
+        upi_builder=upi_components["builder"] if upi_components is not None else None,
+        upi_model=upi_components["model"] if upi_components is not None else None,
+        upi_calibrator=upi_components["calibrator"] if upi_components is not None else None,
+        upi_shap_explainer=upi_components["explainer"] if upi_components is not None else None,
         model_fairness_audit_passed=fairness_result,
         health_model_version=health_model_version,
         tier_model_versions=tier_model_versions,
-        coverage_tiers_available=("FULL", "REDUCED"),
+        coverage_tiers_available=coverage_tiers,
         reproducibility_report=MappingProxyType(reproducibility_report),
         mock_mode=False,
     )
@@ -778,6 +926,36 @@ def _load_joblib_artifact(artifact_dir: str, filename: str, label: str) -> Any:
         raise RuntimeError(f"Failed to load {label}: {path}") from exc
 
 
+def _load_optional_upi_runtime_components(artifact_dir: str) -> dict[str, Any] | None:
+    filenames = {
+        "builder": "upi_feature_builder.joblib",
+        "model": "upi_model.joblib",
+        "calibrator": "upi_calibrator.joblib",
+        "explainer": "upi_shap_explainer.joblib",
+    }
+    if not all(os.path.exists(os.path.join(artifact_dir, filename)) for filename in filenames.values()):
+        return None
+
+    # Some UPI artifacts were trained from `python -m src.models.upi` in a way
+    # that pickled UpiFeatureBuilder under __main__. Make both names loadable.
+    try:
+        upi_module = importlib.import_module("src.models.upi")
+        setattr(sys.modules["__main__"], "UpiFeatureBuilder", upi_module.UpiFeatureBuilder)
+    except Exception as exc:
+        raise RuntimeError("Failed to prepare UPI artifact loader") from exc
+
+    components = {
+        key: _load_joblib_artifact(artifact_dir, filename, f"UPI {key}")
+        for key, filename in filenames.items()
+    }
+    report = _load_optional_json(artifact_dir, "upi_training_report.json")
+    model_version = report.get("model_version")
+    components["model_version"] = (
+        model_version if isinstance(model_version, str) and model_version else _build_composite_model_version("UPI")
+    )
+    return components
+
+
 def _load_optional_json(artifact_dir: str, filename: str) -> dict[str, Any]:
     path = os.path.join(artifact_dir, filename)
     if not os.path.exists(path):
@@ -833,9 +1011,16 @@ def _validate_tier_runtime(
 
 def _build_smoke_payload(tier: str) -> dict[str, Any]:
     sample_payload = _build_demo_seed_payload()
-    if tier.upper() == "REDUCED":
+    normalized_tier = tier.upper()
+    if normalized_tier == "REDUCED":
         return {"application": sample_payload["application"]}
-    return sample_payload
+    if normalized_tier == "UPI":
+        return {UPI_SECTION: sample_payload[UPI_SECTION]}
+    return _without_upi_section(sample_payload)
+
+
+def _without_upi_section(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key != UPI_SECTION}
 
 
 def _build_demo_seed_payload() -> dict[str, Any]:
@@ -931,11 +1116,33 @@ def _build_demo_seed_payload() -> dict[str, Any]:
             "CC_DRAWINGS_ATM_SUM": 4500.0,
             "CC_DRAWINGS_CURRENT_SUM": 9000.0,
         },
+        UPI_SECTION: {
+            "balance_instability_score": 0.18,
+            "failed_due_to_low_balance": 2.0,
+            "failed_txn_count": 4.0,
+            "outflow_volatility": 4200.0,
+            "inflow_volatility": 3500.0,
+            "txn_value_std": 950.0,
+            "monthly_inflow": 98000.0,
+            "monthly_outflow": 72000.0,
+            "success_txn_count": 86.0,
+            "monthly_txn_count": 95.0,
+            "avg_txn_value": 1780.0,
+            "median_txn_value": 920.0,
+            "inflow_txn_count": 22.0,
+            "outflow_txn_count": 73.0,
+            "weekday_txn_ratio": 0.72,
+            "weekend_txn_ratio": 0.28,
+            "distinct_counterparties": 34.0,
+            "active_days": 24.0,
+            "peak_txn_day_count": 9.0,
+        },
     }
 
 
 def _build_demo_config(runtime: ApiRuntime) -> dict[str, Any]:
     sample_payload = _build_demo_seed_payload()
+    full_sample_payload = _without_upi_section(sample_payload)
     sections: list[dict[str, Any]] = []
 
     for section_name in FULL_SECTION_ORDER:
@@ -962,6 +1169,16 @@ def _build_demo_config(runtime: ApiRuntime) -> dict[str, Any]:
             }
         )
 
+    upi_fields = [
+        {
+            "name": field_name,
+            "kind": "number",
+            "options": [],
+        }
+        for field_name in UPI_REQUIRED_FIELDS
+    ]
+    supported_tiers = list(runtime.coverage_tiers_available)
+
     return {
         "runtimeMode": "mock" if runtime.mock_mode else "real",
         "healthModelVersion": runtime.health_model_version,
@@ -969,10 +1186,17 @@ def _build_demo_config(runtime: ApiRuntime) -> dict[str, Any]:
         "fairnessAuditPassed": runtime.model_fairness_audit_passed,
         "fairnessAuditVersion": FAIRNESS_AUDIT_VERSION,
         "defaultTier": "REDUCED",
+        "supportedTiers": supported_tiers,
         "sections": sections,
+        "upiSection": {
+            "name": UPI_SECTION,
+            "label": "UPI Transaction Signals",
+            "fields": upi_fields,
+        },
         "samplePayloads": {
-            "FULL": sample_payload,
+            "FULL": full_sample_payload,
             "REDUCED": {"application": sample_payload["application"]},
+            "UPI": {UPI_SECTION: sample_payload[UPI_SECTION]},
         },
         "routes": {
             "health": "/health",
@@ -996,6 +1220,20 @@ def _get_tier_runtime_components(runtime: ApiRuntime, tier: str) -> tuple[Any, A
             runtime.reduced_model,
             runtime.reduced_calibrator,
             runtime.reduced_shap_explainer,
+        )
+    if tier == "UPI":
+        if (
+            runtime.upi_builder is None
+            or runtime.upi_model is None
+            or runtime.upi_calibrator is None
+            or runtime.upi_shap_explainer is None
+        ):
+            raise _api_error("unsupported_tier")
+        return (
+            runtime.upi_builder,
+            runtime.upi_model,
+            runtime.upi_calibrator,
+            runtime.upi_shap_explainer,
         )
     raise RuntimeError(f"Unsupported tier: {tier}")
 
@@ -1223,6 +1461,7 @@ __all__ = [
     "APPLICATION_REQUIRED_FIELDS",
     "AGG_REQUIRED_FIELDS",
     "ApiRuntime",
+    "UPI_REQUIRED_FIELDS",
     "build_input_df",
     "create_app",
     "determine_coverage_tier",
