@@ -3,7 +3,7 @@
 Run everything from the repo root:
 
 ```powershell
-cd c:\Users\shrey\Everything\AI_CreditScoring
+cd C:\Users\vedan\OneDrive\Desktop\EDI1\AI_CreditScoring
 ```
 
 This is the real-data flow. It requires these raw files in `data\raw\`:
@@ -16,8 +16,9 @@ This is the real-data flow. It requires these raw files in `data\raw\`:
 - `installments_payments.csv`
 - `POS_CASH_balance.csv`
 - `credit_card_balance.csv`
+- `final_base_with_upi_corrected.csv` for the standalone UPI model
 
-I’d use `venv\Scripts\python.exe` directly so you don’t get blocked by PowerShell activation policy.
+Use `venv\Scripts\python.exe` directly so you do not get blocked by PowerShell activation policy.
 
 ---
 
@@ -120,6 +121,73 @@ Expected current truth:
 - FULL selected candidate: `weighted_blend_full`
 - REDUCED version: `reduced_v2.1.0`
 
+**Module 3B: standalone UPI model**
+
+This trains the new UPI model from:
+
+```text
+data\raw\final_base_with_upi_corrected.csv
+```
+
+It does not overwrite the existing FULL or REDUCED artifacts. It creates a separate UPI artifact set.
+
+```powershell
+venv\Scripts\python.exe -m src.models.upi
+```
+
+Useful options:
+
+```powershell
+venv\Scripts\python.exe -m src.models.upi --help
+venv\Scripts\python.exe -m src.models.upi --sample-rows 1000 --artifact-dir artifacts\upi_smoke
+venv\Scripts\python.exe -m src.models.upi --dataset-path data\raw\final_base_with_upi_corrected.csv --artifact-dir artifacts\
+```
+
+Expected UPI outputs:
+
+- `artifacts\upi_feature_builder.joblib`
+- `artifacts\upi_model.joblib`
+- `artifacts\upi_calibrator.joblib`
+- `artifacts\upi_shap_explainer.joblib`
+- `artifacts\upi_training_report.json`
+
+Check the UPI report:
+
+```powershell
+@'
+import json
+with open("artifacts/upi_training_report.json", "r", encoding="utf-8") as f:
+    r = json.load(f)
+print("upi_model_version:", r["model_version"])
+print("feature_count:", r["feature_count"])
+print("roc_auc:", r["metrics"]["roc_auc"])
+print("auc_pr:", r["metrics"]["auc_pr"])
+print("brier_score:", r["metrics"]["brier_score"])
+print("default_rate:", r["metrics"]["default_rate"])
+'@ | venv\Scripts\python.exe -
+```
+
+Score a few rows from the UPI CSV directly:
+
+```powershell
+@'
+import pandas as pd
+from src.models.upi import score_upi_frame
+
+df = pd.read_csv("data/raw/final_base_with_upi_corrected.csv", nrows=5)
+print(score_upi_frame(df).to_string(index=False))
+'@ | venv\Scripts\python.exe -
+```
+
+Important UPI modeling notes:
+
+- The current UPI flow uses internal feature engineering plus XGBoost `scale_pos_weight` for class imbalance.
+- It does not currently write SMOTE-resampled files into `data\processed`.
+- It drops `SK_ID_CURR`, `TARGET`, `SK_ID_PREV`, and known empty source columns before modeling.
+- It converts `DAYS_EMPLOYED = 365243` into a `DAYS_EMPLOYED_ANOM` flag and removes that value as a real duration.
+- It treats `XNA` as `Unknown`.
+- If UPI metrics are extremely high, especially ROC-AUC near `0.99`, treat that as a leakage warning. Check whether UPI features were generated from `TARGET`, include post-default behavior, or were created with target-aware synthetic logic.
+
 **Module 4: fairness audit + explainability/eval plots**
 
 ```powershell
@@ -148,7 +216,7 @@ Expected current state in this repo: fairness still ends up `False`.
 Open a second PowerShell window in the repo root and set the same env vars:
 
 ```powershell
-cd c:\Users\shrey\Everything\AI_CreditScoring
+cd C:\Users\vedan\OneDrive\Desktop\EDI1\AI_CreditScoring
 $env:DATA_RAW_DIR = "data/raw/"
 $env:DATA_PROCESSED_DIR = "data/processed/"
 $env:ARTIFACT_DIR = "artifacts/"
@@ -279,7 +347,7 @@ venv\Scripts\python.exe -m pytest tests/test_subgroup_calibration.py -q
 If you just want the shortest real pipeline command chain:
 
 ```powershell
-cd c:\Users\shrey\Everything\AI_CreditScoring
+cd C:\Users\vedan\OneDrive\Desktop\EDI1\AI_CreditScoring
 $env:DATA_RAW_DIR = "data/raw/"
 $env:DATA_PROCESSED_DIR = "data/processed/"
 $env:ARTIFACT_DIR = "artifacts/"
@@ -291,8 +359,9 @@ $env:EVAL_PLOTS_DIR = "notebooks/eval_plots/"
 venv\Scripts\python.exe -m src.data_pipeline
 venv\Scripts\python.exe -m src.feature_engineering
 venv\Scripts\python.exe -m src.models.train
+venv\Scripts\python.exe -m src.models.upi
 venv\Scripts\python.exe -m src.fairness_audit
 venv\Scripts\python.exe -m pytest tests -q
 ```
 
-If you want, I can turn this into a `RUNBOOK.md` or a `scripts/run_full_pipeline.ps1` so you can execute the whole flow with one command.
+The `src.models.upi` command is standalone. Skip it if you only want the original FULL/REDUCED pipeline.
