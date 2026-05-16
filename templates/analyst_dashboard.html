@@ -52,7 +52,7 @@
                 <div class="analyst-toolbar">
                     <div class="input-field analyst-search-field">
                         <label for="analyst-search">Search</label>
-                        <input id="analyst-search" type="search" placeholder="Search by applicant name, SK_ID_CURR, tier, or status">
+                        <input id="analyst-search" type="search" placeholder="Search by applicant name, applicant ID, tier, or status">
                     </div>
                     <div class="input-field analyst-sort-field">
                         <label for="analyst-sort">Sort</label>
@@ -87,7 +87,7 @@
                     <table class="table analyst-table" id="analyst-applications-table">
                         <thead>
                             <tr>
-                                <th>SK_ID_CURR</th>
+                                <th>Applicant ID</th>
                                 <th>Applicant Name</th>
                                 <th>Date</th>
                                 <th>Tier Type</th>
@@ -177,7 +177,7 @@
 
                     <div class="analyst-detail-grid">
                         <div class="analyst-detail-item">
-                            <span class="analyst-detail-label">SK_ID_CURR</span>
+                            <span class="analyst-detail-label">Applicant ID</span>
                             <strong id="detail-sk-id">{{ selected_application.sk_id_curr or "—" }}</strong>
                         </div>
                         <div class="analyst-detail-item">
@@ -254,7 +254,7 @@
                         <strong id="brief-applicant-name">—</strong>
                     </div>
                     <div class="credit-brief-item">
-                        <span class="credit-brief-label">SK_ID_CURR</span>
+                        <span class="credit-brief-label">Applicant ID</span>
                         <strong id="brief-sk-id">—</strong>
                     </div>
                     <div class="credit-brief-item">

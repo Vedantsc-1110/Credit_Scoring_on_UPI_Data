@@ -9,6 +9,7 @@
     const state = {
         tier: "REDUCED",
     };
+    const THEME_STORAGE_KEY = "mastermind-theme";
 
     const FIELD_GROUPS = {
         application: [
@@ -197,6 +198,50 @@
             return;
         }
         nav.classList.toggle("scrolled", window.scrollY > 60);
+    }
+
+    function setTheme(theme) {
+        const nextTheme = theme === "dark" ? "dark" : "light";
+        document.documentElement.dataset.theme = nextTheme;
+
+        const toggle = document.querySelector("[data-theme-toggle]");
+        const label = document.querySelector("[data-theme-toggle-text]");
+        const isDark = nextTheme === "dark";
+
+        if (toggle) {
+            toggle.setAttribute("aria-pressed", isDark ? "true" : "false");
+            toggle.setAttribute("aria-label", isDark ? "Switch to light mode" : "Switch to dark mode");
+        }
+        if (label) {
+            label.textContent = isDark ? "Light" : "Dark";
+        }
+    }
+
+    function initThemeToggle() {
+        let storedTheme = null;
+        try {
+            storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+        } catch (error) {
+            storedTheme = null;
+        }
+        const preferredTheme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        setTheme(storedTheme || preferredTheme);
+
+        const toggle = document.querySelector("[data-theme-toggle]");
+        if (!toggle) {
+            return;
+        }
+
+        toggle.addEventListener("click", function () {
+            const currentTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+            const nextTheme = currentTheme === "dark" ? "light" : "dark";
+            try {
+                window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+            } catch (error) {
+                // Theme still changes for the current session when storage is unavailable.
+            }
+            setTheme(nextTheme);
+        });
     }
 
     function formatProbability(value) {
@@ -657,6 +702,7 @@
 
     window.addEventListener("scroll", navScrollState, { passive: true });
     navScrollState();
+    initThemeToggle();
 
     if (page === "analyze") {
         initAnalyzePage();

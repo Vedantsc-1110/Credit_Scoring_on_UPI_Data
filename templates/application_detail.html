@@ -19,7 +19,7 @@
 
         <div class="status-panel">
             <div class="status-row"><span class="status-label">Applicant</span><span class="status-value">{{ application.applicant_name }}</span></div>
-            <div class="status-row"><span class="status-label">SK_ID_CURR</span><span class="status-value">{{ application.sk_id_curr or "Not assigned" }}</span></div>
+            <div class="status-row"><span class="status-label">Applicant ID</span><span class="status-value">{{ application.sk_id_curr or "Not assigned" }}</span></div>
             <div class="status-row"><span class="status-label">Tier</span><span class="status-value">{{ application.tier_type }}</span></div>
             <div class="status-row"><span class="status-label">Status</span><span class="status-value">{{ application.current_status }}</span></div>
             <div class="status-row"><span class="status-label">Last Decision</span><span class="status-value">{{ application.last_decision or "Not analyzed yet" }}</span></div>

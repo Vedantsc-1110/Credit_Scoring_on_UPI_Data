@@ -13,7 +13,7 @@
                             Application #{{ application.id }}
                             {% if application.sk_id_curr %}
                             <span class="report-inline-separator">|</span>
-                            SK_ID_CURR {{ application.sk_id_curr }}
+                            Applicant ID {{ application.sk_id_curr }}
                             {% endif %}
                         </p>
                     </div>
@@ -408,7 +408,7 @@
                             <strong>{{ application.applicant_name }}</strong>
                         </div>
                         <div class="report-key-value-row">
-                            <span>SK_ID_CURR</span>
+                            <span>Applicant ID</span>
                             <strong>{{ application.sk_id_curr or "-" }}</strong>
                         </div>
                         <div class="report-key-value-row">

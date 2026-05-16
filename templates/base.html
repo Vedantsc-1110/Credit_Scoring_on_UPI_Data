@@ -8,6 +8,17 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Libre+Baskerville:wght@400;700&display=swap" rel="stylesheet">
+    <script>
+        (function () {
+            try {
+                var storedTheme = window.localStorage.getItem("mastermind-theme");
+                var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+                document.documentElement.dataset.theme = storedTheme || (prefersDark ? "dark" : "light");
+            } catch (error) {
+                document.documentElement.dataset.theme = "light";
+            }
+        })();
+    </script>
     <link rel="stylesheet" href="{{ url_for('ui_static', filename='style.css') }}">
 </head>
 <body data-page="{{ active_nav }}">
@@ -73,6 +84,13 @@
                         <span class="utility-value">{{ health_snapshot.coverage_tiers_available | join(", ") }}</span>
                     </div>
                 </div>
+
+                <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark mode" aria-pressed="false">
+                    <span class="theme-toggle-track" aria-hidden="true">
+                        <span class="theme-toggle-thumb"></span>
+                    </span>
+                    <span class="theme-toggle-text" data-theme-toggle-text>Dark</span>
+                </button>
             </header>
 
             <main class="page-main">
