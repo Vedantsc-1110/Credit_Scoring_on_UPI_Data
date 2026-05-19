@@ -62,12 +62,13 @@
         return Number.isFinite(parsed) ? parsed : null;
     }
 
-    function formatProbability(value) {
+    function formatCreditScore(value) {
         const parsed = parseProbability(value);
         if (parsed === null) {
             return "-";
         }
-        return `${(parsed * 100).toFixed(1)}%`;
+        const probability = Math.min(Math.max(parsed, 0), 1);
+        return String(Math.round(300 + ((1 - probability) * 600)));
     }
 
     function decisionClass(decision) {
@@ -173,7 +174,7 @@
         date.textContent = data.submittedAt || "-";
         tier.textContent = data.tier || "-";
         modelVersion.textContent = data.modelVersion || "-";
-        probability.textContent = formatProbability(data.lastProbability);
+        probability.textContent = formatCreditScore(data.lastProbability);
         decision.innerHTML = data.lastDecision
             ? `<span class="decision-badge ${decisionClass(data.lastDecision)}">${data.lastDecision}</span>`
             : '<span class="analyst-detail-placeholder">No saved decision</span>';
@@ -252,7 +253,7 @@
         } else {
             lastDecision.textContent = "No saved decision";
         }
-        document.getElementById("brief-last-probability").textContent = formatProbability(application.last_probability);
+        document.getElementById("brief-last-probability").textContent = formatCreditScore(application.last_probability);
         document.getElementById("brief-model-version").textContent = application.last_model_version || "-";
 
         const fairnessStatus = document.getElementById("brief-fairness-status");

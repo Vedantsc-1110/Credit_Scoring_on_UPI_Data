@@ -735,6 +735,7 @@ def score_request(payload: dict, runtime: ApiRuntime, mock_mode: bool = False) -
     features = _invoke_builder(builder, input_df)
     raw_pd = _predict_raw_pd(model, features)
     calibrated_pd = _calibrate_pd(calibrator, raw_pd)
+    credit_score = _credit_score_from_pd(calibrated_pd)
     decision = _decision_from_pd(calibrated_pd)
     explanations = (
         _mock_top_5_explanations(features.columns)
@@ -744,6 +745,7 @@ def score_request(payload: dict, runtime: ApiRuntime, mock_mode: bool = False) -
 
     return {
         "probability_of_default": calibrated_pd,
+        "credit_score": credit_score,
         "decision": decision,
         "escalate": decision == "REVIEW",
         "top_5_explanations": explanations,
@@ -753,6 +755,11 @@ def score_request(payload: dict, runtime: ApiRuntime, mock_mode: bool = False) -
         "fairness_audit_version": FAIRNESS_AUDIT_VERSION,
         "coverage_tier": tier,
     }
+
+
+def _credit_score_from_pd(probability_of_default: float) -> int:
+    probability = min(max(float(probability_of_default), 0.0), 1.0)
+    return int(round(300 + ((1.0 - probability) * 600.0)))
 
 
 def _resolve_runtime_dirs(

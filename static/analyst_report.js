@@ -14,10 +14,6 @@
     const resultCard = document.getElementById("simulate-result-card");
     const baselineValues = new Map(inputs.map((input) => [input.name, String(input.defaultValue || "").trim()]));
     const slidersByTarget = new Map(sliders.map((slider) => [slider.dataset.targetInput, slider]));
-    const reportChatContext = window.__REPORT_CHAT_CONTEXT__ && typeof window.__REPORT_CHAT_CONTEXT__ === "object"
-        ? window.__REPORT_CHAT_CONTEXT__
-        : null;
-
     function setHidden(element, hidden) {
         if (!element) {
             return;
@@ -179,21 +175,6 @@
         }
 
         renderChanges(result.changed_features || []);
-        if (reportChatContext) {
-            reportChatContext.simulator_result = {
-                original_probability_text: result.original_probability_text || simulatorConfig.originalProbabilityText || "-",
-                original_decision_label: result.original_decision_label || simulatorConfig.originalDecisionLabel || "Pending",
-                simulated_probability_text: result.simulated_probability_text || "-",
-                simulated_decision_label: result.simulated_decision_label || "Pending",
-                simulated_decision_badge_class: result.simulated_decision_badge_class || "review",
-                delta_text: result.delta_text || "-",
-                delta_direction: result.delta_direction || "flat",
-                risk_movement_label: result.risk_movement_label || "Risk movement unavailable",
-                decision_delta_label: result.decision_delta_label || "Decision unchanged",
-                change_count: result.change_count || 0,
-                changed_features: Array.isArray(result.changed_features) ? result.changed_features : [],
-            };
-        }
         setHidden(resultCard, false);
     }
 
@@ -242,9 +223,6 @@
         setHidden(errorState, true);
         errorState.textContent = "";
         setHidden(resultCard, true);
-        if (reportChatContext) {
-            reportChatContext.simulator_result = null;
-        }
     }
 
     inputs.forEach((input) => {

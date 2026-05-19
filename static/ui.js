@@ -244,12 +244,17 @@
         });
     }
 
-    function formatProbability(value) {
-        const numeric = Number(value);
-        if (!Number.isFinite(numeric)) {
-            return "0%";
+    function formatCreditScore(probabilityValue, scoreValue) {
+        const score = Number(scoreValue);
+        if (Number.isFinite(score)) {
+            return String(Math.round(Math.min(Math.max(score, 300), 900)));
         }
-        return `${Math.round(numeric * 100)}%`;
+        const numeric = Number(probabilityValue);
+        if (!Number.isFinite(numeric)) {
+            return "-";
+        }
+        const probability = Math.min(Math.max(numeric, 0), 1);
+        return String(Math.round(300 + ((1 - probability) * 600)));
     }
 
     function decisionClass(decision) {
@@ -493,6 +498,7 @@
 
     function renderMetadata(elements, response) {
         const rows = [
+            ["Credit Score Range", "300-900"],
             ["Coverage Tier", response.coverage_tier || "-"],
             ["Calibrated", response.calibrated ? "Yes" : "No"],
             ["Fairness Audit", response.model_fairness_audit_passed ? "Passed" : "Not passed"],
@@ -539,7 +545,7 @@
     }
 
     function renderResult(elements, response) {
-        elements.probability.textContent = formatProbability(response.probability_of_default);
+        elements.probability.textContent = formatCreditScore(response.probability_of_default, response.credit_score);
         elements.decision.textContent = response.decision || "REVIEW";
         elements.decision.className = `decision-pill ${decisionClass(response.decision)}`;
         renderMetadata(elements, response);

@@ -179,10 +179,12 @@
             return;
         }
 
-        const probability = Number(responseBody.probability_of_default || 0).toFixed(4);
+        const score = Number.isFinite(Number(responseBody.credit_score))
+            ? Math.round(Number(responseBody.credit_score))
+            : Math.round(300 + ((1 - Number(responseBody.probability_of_default || 0)) * 600));
         const fairnessLabel = responseBody.model_fairness_audit_passed ? "passed" : "failed";
         elements.resultSummary.innerHTML = [
-            `<strong>${responseBody.decision}</strong> decision at PD ${probability}.`,
+            `<strong>${responseBody.decision}</strong> decision with score ${score}/900.`,
             `Tier ${responseBody.coverage_tier} scored with ${responseBody.model_version}.`,
             `Offline fairness audit ${fairnessLabel}; API returned ${responseBody.top_5_explanations.length} explanations.`,
             `<div class="result-chip-row">`,

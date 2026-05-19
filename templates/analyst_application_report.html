@@ -20,8 +20,8 @@
 
                     <div class="report-hero-outcome">
                         <span class="decision-badge {{ report.decision_badge_class }}">{{ report.decision_label }}</span>
-                        <strong class="report-hero-probability">{{ report.probability_text }}</strong>
-                        <span class="report-hero-caption">Calibrated probability of default</span>
+                        <strong class="report-hero-probability">{{ report.credit_score_text }}</strong>
+                        <span class="report-hero-caption">Credit score out of 900</span>
                     </div>
                 </div>
                 <p class="report-hero-summary">{{ report.decision_summary }}</p>
@@ -70,8 +70,8 @@
                         <div class="report-gauge-shell">
                             <div class="report-gauge" style="--gauge-value: {{ '%.1f'|format(report.gauge_value) }}%;">
                                 <div class="report-gauge-inner">
-                                    <span class="report-gauge-label">PD</span>
-                                    <strong>{{ report.probability_text }}</strong>
+                                    <span class="report-gauge-label">Score</span>
+                                    <strong>{{ report.credit_score_text }}</strong>
                                     <span class="report-gauge-caption">{{ report.decision_label }}</span>
                                 </div>
                             </div>
@@ -333,17 +333,17 @@
                     <div class="report-simulator-result is-hidden" id="simulate-result-card">
                         <div class="report-sim-metrics">
                             <article class="report-sim-metric">
-                                <span>Original probability</span>
+                                <span>Original score</span>
                                 <strong id="sim-original-probability">{{ report.probability_text }}</strong>
                                 <p id="sim-original-decision">{{ report.decision_label }}</p>
                             </article>
                             <article class="report-sim-metric emphasis">
-                                <span>Simulated probability</span>
+                                <span>Simulated score</span>
                                 <strong id="sim-probability">-</strong>
                                 <p id="sim-decision">Pending</p>
                             </article>
                             <article class="report-sim-metric" id="sim-delta-card">
-                                <span>Probability delta</span>
+                                <span>Score delta</span>
                                 <strong id="sim-delta">-</strong>
                                 <p id="sim-risk-movement">Risk movement pending</p>
                             </article>
@@ -455,7 +455,7 @@
                                     <strong>{{ run.scored_at_display }}</strong>
                                 </div>
                                 <div class="report-key-value-row">
-                                    <span>Calibrated PD</span>
+                                    <span>Credit Score</span>
                                     <strong>{{ run.probability_text }}</strong>
                                 </div>
                                 <div class="report-key-value-row">
@@ -474,88 +474,6 @@
                     {% endif %}
                 </article>
 
-                <article class="report-panel report-copilot-panel" id="report-copilot-root">
-                    <div class="report-panel-header">
-                        <div>
-                            <p class="eyebrow">Analyst Copilot</p>
-                            <h2>Grounded report assistant</h2>
-                        </div>
-                        <button
-                            type="button"
-                            class="button button-ghost report-copilot-toggle"
-                            id="report-copilot-toggle"
-                            aria-expanded="true"
-                            aria-controls="report-copilot-body"
-                        >
-                            Hide
-                        </button>
-                    </div>
-
-                    <p class="report-copilot-disclaimer">
-                        Analyst assistant only. Responses are grounded to this application report and are not an automated decision engine.
-                    </p>
-
-                    <div class="ui-chip-row">
-                        <span class="ui-chip info">Grounded to this report</span>
-                        <span class="ui-chip neutral">Top drivers + SHAP narratives</span>
-                        <span class="ui-chip warning">Simulator-aware when active</span>
-                    </div>
-
-                    <div class="report-copilot-statusline" id="report-copilot-status">
-                        <span class="report-copilot-status-dot"></span>
-                        Checking copilot availability...
-                    </div>
-
-                    <div class="report-copilot-body" id="report-copilot-body">
-                        <div class="report-copilot-prompts">
-                            <button
-                                type="button"
-                                class="report-copilot-prompt report-copilot-prompt-primary"
-                                data-copilot-prompt
-                                data-copilot-prompt-template="Generate a decision letter for the applicant: {applicant_id}"
-                            >
-                                Generate decision letter
-                            </button>
-                            <button type="button" class="report-copilot-prompt" data-copilot-prompt>Summarize the risk profile</button>
-                            <button type="button" class="report-copilot-prompt" data-copilot-prompt>Explain the main decline reasons in simple language</button>
-                            <button type="button" class="report-copilot-prompt" data-copilot-prompt>What changes reduced risk in the simulator?</button>
-                            <button type="button" class="report-copilot-prompt" data-copilot-prompt>What should an analyst review before approval?</button>
-                        </div>
-
-                        <div class="report-copilot-messages" id="report-copilot-messages">
-                            <div class="report-copilot-message report-copilot-message-bot">
-                                <div class="report-copilot-avatar">AI</div>
-                                <div class="report-copilot-bubble">
-                                    <p>I’m grounded on this application report only.</p>
-                                    <p>Ask for a risk summary, adverse-action style explanation, analyst review checklist, or simulator comparison.</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="report-copilot-typing is-hidden" id="report-copilot-typing">
-                            <div class="report-copilot-avatar">AI</div>
-                            <div class="report-copilot-typing-dots">
-                                <span></span><span></span><span></span>
-                            </div>
-                        </div>
-
-                        <div class="report-copilot-error is-hidden" id="report-copilot-error"></div>
-
-                        <form class="report-copilot-form" id="report-copilot-form">
-                            <div class="report-copilot-input-wrap">
-                                <input
-                                    type="text"
-                                    id="report-copilot-input"
-                                    class="report-copilot-input"
-                                    placeholder="Ask about this application report..."
-                                    autocomplete="off"
-                                    maxlength="500"
-                                >
-                                <button type="submit" class="report-copilot-send" id="report-copilot-send">Send</button>
-                            </div>
-                        </form>
-                    </div>
-                </article>
             </aside>
         </div>
     </div>
@@ -564,17 +482,11 @@
 
 {% block scripts %}
 <script>
-    window.__REPORT_CHAT_CONTEXT__ = {{ report_chat_context | tojson }};
     window.__REPORT_SIMULATOR__ = {
         endpoint: {{ url_for('analyst_application_simulate', application_id=application.id) | tojson }},
         originalProbabilityText: {{ report.probability_text | tojson }},
         originalDecisionLabel: {{ report.decision_label | tojson }}
     };
-    window.__REPORT_COPILOT__ = {
-        endpoint: {{ url_for('api_chat') | tojson }},
-        healthEndpoint: {{ url_for('api_chat_health') | tojson }}
-    };
 </script>
 <script src="{{ url_for('ui_static', filename='analyst_report.js') }}"></script>
-<script src="{{ url_for('ui_static', filename='report_copilot.js') }}"></script>
 {% endblock %}

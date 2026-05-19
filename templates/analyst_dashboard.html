@@ -33,9 +33,9 @@
                 <p class="analyst-kpi-meta">Applications with at least one persisted score run.</p>
             </article>
             <article class="analyst-kpi-card">
-                <span class="analyst-kpi-label">Average PD</span>
-                <strong class="analyst-kpi-value">{{ "%.1f%%"|format(dashboard_stats.avg_probability * 100) if dashboard_stats.avg_probability is not none else "--" }}</strong>
-                <p class="analyst-kpi-meta">Across rows with a saved probability.</p>
+                <span class="analyst-kpi-label">Average Score</span>
+                <strong class="analyst-kpi-value">{{ dashboard_stats.avg_credit_score_text }}</strong>
+                <p class="analyst-kpi-meta">CIBIL-style score across analyzed rows.</p>
             </article>
         </div>
 
@@ -60,8 +60,8 @@
                             <option value="date_desc">Newest first</option>
                             <option value="date_asc">Oldest first</option>
                             <option value="name_asc">Applicant A-Z</option>
-                            <option value="prob_desc">Highest probability</option>
-                            <option value="prob_asc">Lowest probability</option>
+                            <option value="prob_asc">Highest score</option>
+                            <option value="prob_desc">Lowest score</option>
                         </select>
                     </div>
                 </div>
@@ -93,7 +93,7 @@
                                 <th>Tier Type</th>
                                 <th>Current Status</th>
                                 <th>Last Decision</th>
-                                <th>Last Probability</th>
+                                <th>Last Score</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -206,7 +206,7 @@
                             </div>
                         </div>
                         <div class="analyst-score-block">
-                            <span class="analyst-detail-label">Last Probability</span>
+                            <span class="analyst-detail-label">Last Score</span>
                             <strong class="analyst-probability" id="detail-probability">{{ selected_application.last_probability_text }}</strong>
                         </div>
                     </div>
@@ -351,7 +351,7 @@
                         <div id="brief-last-decision">—</div>
                     </div>
                     <div class="credit-brief-item">
-                        <span class="credit-brief-label">Last Probability</span>
+                        <span class="credit-brief-label">Last Score</span>
                         <strong id="brief-last-probability">—</strong>
                     </div>
                     <div class="credit-brief-item">

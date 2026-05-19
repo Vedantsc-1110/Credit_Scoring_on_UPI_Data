@@ -229,7 +229,7 @@
                         {% for run in score_history[:5] %}
                         <article class="analyst-history-item">
                             <strong>{{ run.scored_at }}</strong>
-                            <p>{{ run.decision or "No decision" }}{% if run.probability is not none %} • {{ "%.1f%%"|format(run.probability * 100) }}{% endif %}</p>
+                            <p>{{ run.decision or "No decision" }}{% if run.probability is not none %} • Score {{ run.probability_text }}{% endif %}</p>
                         </article>
                         {% endfor %}
                     </div>

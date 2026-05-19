@@ -40,7 +40,7 @@
                     <thead>
                         <tr>
                             <th>Scored At</th>
-                            <th>Probability</th>
+                            <th>Credit Score</th>
                             <th>Decision</th>
                             <th>Model Version</th>
                         </tr>
@@ -49,7 +49,7 @@
                         {% for run in score_history %}
                         <tr>
                             <td>{{ run.scored_at }}</td>
-                            <td>{{ run.probability if run.probability is not none else "-" }}</td>
+                            <td>{{ run.probability_text }}</td>
                             <td>{{ run.decision or "-" }}</td>
                             <td class="monospace">{{ run.model_version or "-" }}</td>
                         </tr>

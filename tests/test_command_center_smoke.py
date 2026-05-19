@@ -84,7 +84,7 @@ def test_existing_routes_and_score_smoke(tmp_path: Path):
     assert client.get(f"/analyst/applications/{application['id']}").status_code == 200
     assert client.get("/status").status_code == 200
     assert client.get("/analytics").status_code == 200
-    assert client.get("/api/chat/health").status_code == 200
+    assert client.get("/api/chat/health").status_code == 404
 
     health_response = client.get("/health")
     assert health_response.status_code == 200

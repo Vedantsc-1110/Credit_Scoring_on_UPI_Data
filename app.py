@@ -18,7 +18,6 @@ from configs.config import (
     DRIFT_MIN_SAMPLE_SIZE,
     DRIFT_WATCH_THRESHOLD,
 )
-from src.chatbot import chat as chatbot_chat, is_gemini_available
 from src.explainability import build_adverse_action_report
 from src.fairness_comparison import build_fairness_comparison_snapshot
 from src.model_monitoring import compute_probability_drift_snapshot
@@ -569,7 +568,7 @@ def _application_view_model(application: dict[str, Any]) -> dict[str, Any]:
     view_model["status_badge_class"] = _status_badge_class(application.get("current_status"))
     view_model["decision_badge_class"] = _decision_badge_class(application.get("last_decision"))
     view_model["decision_label"] = _decision_label(application.get("last_decision"))
-    view_model["last_probability_text"] = _format_probability_pct(application.get("last_probability"))
+    view_model["last_probability_text"] = _format_credit_score(application.get("last_probability"))
     return view_model
 
 
@@ -584,7 +583,7 @@ def _score_run_view_model(score_run: dict[str, Any]) -> dict[str, Any]:
     view_model["score_payload_pretty"] = json.dumps(payload_obj, indent=2) if payload_obj is not None else raw_payload
     view_model["decision_badge_class"] = _decision_badge_class(score_run.get("decision"))
     view_model["decision_label"] = _decision_label(score_run.get("decision"))
-    view_model["probability_text"] = _format_probability_pct(score_run.get("probability"))
+    view_model["probability_text"] = _format_credit_score(score_run.get("probability"))
     return view_model
 
 
@@ -649,6 +648,18 @@ def _format_probability_pct(value: Any) -> str:
     if isinstance(value, (int, float)):
         return f"{float(value) * 100:.1f}%"
     return "—"
+
+
+def _credit_score_from_probability(value: Any) -> int | None:
+    if not isinstance(value, (int, float)):
+        return None
+    probability = min(max(float(value), 0.0), 1.0)
+    return int(round(300 + ((1.0 - probability) * 600.0)))
+
+
+def _format_credit_score(value: Any) -> str:
+    score = _credit_score_from_probability(value)
+    return str(score) if score is not None else "—"
 
 
 def _format_scalar_snapshot(value: Any) -> str:
@@ -723,6 +734,18 @@ def _format_probability_pct(value: Any) -> str:
     if isinstance(value, (int, float)):
         return f"{float(value) * 100:.1f}%"
     return "-"
+
+
+def _credit_score_from_probability(value: Any) -> int | None:
+    if not isinstance(value, (int, float)):
+        return None
+    probability = min(max(float(value), 0.0), 1.0)
+    return int(round(300 + ((1.0 - probability) * 600.0)))
+
+
+def _format_credit_score(value: Any) -> str:
+    score = _credit_score_from_probability(value)
+    return str(score) if score is not None else "-"
 
 
 def _format_scalar_snapshot(value: Any) -> str:
@@ -872,7 +895,7 @@ def _build_report_context(
     analyzed_at = latest_score_run.get("scored_at") if latest_score_run else None
     gauge_value = 0.0
     if isinstance(probability, (int, float)):
-        gauge_value = min(max(float(probability) * 100.0, 0.0), 100.0)
+        gauge_value = min(max((1.0 - float(probability)) * 100.0, 0.0), 100.0)
 
     top_drivers = [
         {
@@ -895,7 +918,7 @@ def _build_report_context(
                 "is_latest": index == 0,
                 "scored_at": run.get("scored_at"),
                 "scored_at_display": _format_timestamp_display(run.get("scored_at")),
-                "probability_text": _format_probability_pct(run_probability),
+                "probability_text": _format_credit_score(run_probability),
                 "decision": run_decision,
                 "decision_label": _decision_label(run_decision),
                 "decision_badge_class": _decision_badge_class(run_decision),
@@ -906,7 +929,7 @@ def _build_report_context(
     last_model_result = [
         {"label": "Current Status", "value": str(application.get("current_status") or "-").replace("_", " ")},
         {"label": "Decision", "value": _decision_label(decision)},
-        {"label": "Calibrated PD", "value": _format_probability_pct(probability)},
+        {"label": "Credit Score", "value": _format_credit_score(probability)},
         {"label": "Model Version", "value": model_version},
     ]
 
@@ -917,7 +940,9 @@ def _build_report_context(
         "decision_badge_class": _decision_badge_class(decision),
         "decision_summary": _decision_summary(decision),
         "probability_value": float(probability) if isinstance(probability, (int, float)) else None,
-        "probability_text": _format_probability_pct(probability),
+        "probability_text": _format_credit_score(probability),
+        "credit_score_value": _credit_score_from_probability(probability),
+        "credit_score_text": _format_credit_score(probability),
         "gauge_value": gauge_value,
         "model_version": model_version,
         "coverage_tier": coverage_tier,
@@ -936,79 +961,6 @@ def _build_report_context(
         "score_history_count": len(history_items),
         "raw_output_pretty": latest_score_run.get("score_payload_pretty") if latest_score_run else "",
         "simulator_fields": _build_simulator_fields(payload, coverage_tier),
-    }
-
-
-def _build_report_chat_context(
-    application: dict[str, Any],
-    report: dict[str, Any],
-) -> dict[str, Any]:
-    top_drivers = report.get("top_drivers") if isinstance(report.get("top_drivers"), list) else []
-    score_history = report.get("score_history") if isinstance(report.get("score_history"), list) else []
-    adverse_action = report.get("adverse_action") if isinstance(report.get("adverse_action"), dict) else {}
-    reasons = adverse_action.get("reasons") if isinstance(adverse_action.get("reasons"), list) else []
-
-    return {
-        "scope": "analyst_application_report",
-        "application_id": application.get("id"),
-        "applicant_summary": {
-            "applicant_name": application.get("applicant_name"),
-            "sk_id_curr": application.get("sk_id_curr"),
-            "coverage_tier": report.get("coverage_tier"),
-            "current_status": str(application.get("current_status") or "-").replace("_", " "),
-            "submitted_at": report.get("submission_display"),
-            "updated_at": report.get("updated_display"),
-        },
-        "latest_assessment": {
-            "decision": report.get("decision"),
-            "decision_label": report.get("decision_label"),
-            "calibrated_probability": report.get("probability_value"),
-            "calibrated_probability_text": report.get("probability_text"),
-            "decision_summary": report.get("decision_summary"),
-            "model_version": report.get("model_version"),
-            "fairness_audit_passed": report.get("fairness_audit_passed"),
-            "analyzed_at": report.get("analyzed_at_display"),
-        },
-        "top_drivers": [
-            {
-                "feature": item.get("feature_label"),
-                "reason": item.get("reason"),
-                "rank": item.get("rank"),
-            }
-            for item in top_drivers[:5]
-        ],
-        "shap_narratives": [
-            str(item).strip()
-            for item in report.get("shap_narratives", [])[:5]
-            if str(item).strip()
-        ],
-        "score_history": [
-            {
-                "scored_at": item.get("scored_at_display"),
-                "decision": item.get("decision"),
-                "decision_label": item.get("decision_label"),
-                "probability_text": item.get("probability_text"),
-                "model_version": item.get("model_version"),
-                "is_latest": bool(item.get("is_latest")),
-            }
-            for item in score_history[:5]
-        ],
-        "adverse_action": {
-            "section_title": adverse_action.get("section_title"),
-            "summary": adverse_action.get("summary"),
-            "reasons": [
-                {
-                    "title": reason.get("title"),
-                    "detail": reason.get("detail"),
-                    "driver_reason": reason.get("driver_reason"),
-                }
-                for reason in reasons[:5]
-            ],
-        },
-        "simulator_result": None,
-        "analyst_guidance": {
-            "disclaimer": "Analyst assistant only. Responses are grounded to this application report and are not automated lending decisions."
-        },
     }
 
 
@@ -1095,8 +1047,9 @@ def _build_simulation_changes(
 def _delta_text(delta: float | None) -> str:
     if delta is None:
         return "-"
-    prefix = "+" if delta > 0 else ""
-    return f"{prefix}{delta * 100:.1f} pts"
+    score_delta = -delta * 600.0
+    prefix = "+" if score_delta > 0 else ""
+    return f"{prefix}{score_delta:.0f} score pts"
 
 
 def _simulate_saved_application(
@@ -1133,11 +1086,11 @@ def _simulate_saved_application(
         "application_id": application_id,
         "coverage_tier": simulated_response.get("coverage_tier", expected_tier),
         "original_probability": original_probability,
-        "original_probability_text": _format_probability_pct(original_probability),
+        "original_probability_text": _format_credit_score(original_probability),
         "original_decision": original_decision,
         "original_decision_label": _decision_label(original_decision),
         "simulated_probability": simulated_probability,
-        "simulated_probability_text": _format_probability_pct(simulated_probability),
+        "simulated_probability_text": _format_credit_score(simulated_probability),
         "simulated_decision": simulated_decision,
         "simulated_decision_label": _decision_label(simulated_decision),
         "simulated_decision_badge_class": _decision_badge_class(simulated_decision),
@@ -1269,6 +1222,7 @@ def _dashboard_stats(applications: list[dict[str, Any]]) -> dict[str, Any]:
         "analyzed": analyzed,
         "decisioned": decisioned,
         "avg_probability": avg_probability,
+        "avg_credit_score_text": _format_credit_score(avg_probability),
     }
 
 
@@ -1547,7 +1501,6 @@ def _install_ui(app: Flask) -> None:
             latest_score_run=latest_score_run,
             score_history=score_history,
             report=report,
-            report_chat_context=_build_report_chat_context(application, report),
         )
 
     def ui_static(filename: str):
@@ -1606,38 +1559,6 @@ def _install_ui(app: Flask) -> None:
         endpoint="ui_artifact",
         view_func=ui_artifact,
     )
-
-    # ── Chatbot API ──────────────────────────────────────────────────
-
-    def api_chat_health():
-        return jsonify({"status": "ok", "gemini_available": is_gemini_available()})
-
-    def api_chat():
-        try:
-            payload = request.get_json(silent=True)
-            if not isinstance(payload, dict):
-                return jsonify({"error": "bad_request", "message": "JSON payload required"}), 400
-
-            message = str(payload.get("message", "")).strip()
-            if not message:
-                return jsonify({"error": "bad_request", "message": "message is required"}), 400
-
-            ctx = payload.get("context", {}) if isinstance(payload.get("context"), dict) else {}
-            result = chatbot_chat(
-                message=message,
-                score_data=ctx.get("score_data"),
-                shap_values=ctx.get("shap_values"),
-                page_context=ctx.get("page_context"),
-                report_context=ctx.get("report_context"),
-                conversation_history=payload.get("history", []) if isinstance(payload.get("history"), list) else [],
-            )
-            return jsonify(result)
-        except Exception as exc:
-            app.logger.exception("Chat endpoint error")
-            return jsonify({"error": "internal_error", "message": str(exc)}), 500
-
-    app.add_url_rule("/api/chat/health", endpoint="api_chat_health", view_func=api_chat_health)
-    app.add_url_rule("/api/chat", endpoint="api_chat", view_func=api_chat, methods=["POST"])
 
 
 app = create_app(

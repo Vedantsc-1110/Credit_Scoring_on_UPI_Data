@@ -113,47 +113,6 @@ def test_status_and_analytics_pages_surface_drift_monitoring(tmp_path: Path):
     assert "\"fairnessComparison\"" in analytics_html
 
 
-def test_chat_route_accepts_grounded_report_context(tmp_path: Path, monkeypatch):
-    app, _ = _load_ui_app(tmp_path)
-    ui_module = importlib.import_module("app")
-    captured: dict[str, object] = {}
-
-    def fake_chat(*, message, score_data=None, shap_values=None, page_context=None, report_context=None, conversation_history=None):
-        captured["message"] = message
-        captured["report_context"] = report_context
-        captured["page_context"] = page_context
-        return {
-            "response": f"Grounded reply for application {report_context.get('application_id')}",
-            "source": "fallback",
-            "gemini_available": False,
-        }
-
-    monkeypatch.setattr(ui_module, "chatbot_chat", fake_chat)
-
-    client = app.test_client()
-    response = client.post(
-        "/api/chat",
-        json={
-            "message": "Summarize the risk profile",
-            "context": {
-                "page_context": {"current_page": "/analyst/applications/7/report"},
-                "report_context": {
-                    "application_id": 7,
-                    "latest_assessment": {"decision_label": "Review", "calibrated_probability_text": "18.4%"},
-                },
-            },
-            "history": [],
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["response"] == "Grounded reply for application 7"
-    assert captured["message"] == "Summarize the risk profile"
-    assert isinstance(captured["report_context"], dict)
-    assert captured["report_context"]["application_id"] == 7
-
-
 def test_analyst_update_and_analyze_flow(tmp_path: Path):
     app, db_path = _load_ui_app(tmp_path)
     reduced_payload = {"application": _build_demo_seed_payload()["application"]}
@@ -201,9 +160,9 @@ def test_analyst_update_and_analyze_flow(tmp_path: Path):
     assert "Deep Insight Report" in report_html
     assert "Risk posture" in report_html
     assert "What-If Simulator" in report_html
-    assert "Grounded report assistant" in report_html
-    assert "Summarize the risk profile" in report_html
-    assert "Analyst assistant only." in report_html
+    assert "Grounded report assistant" not in report_html
+    assert "Summarize the risk profile" not in report_html
+    assert "Analyst assistant only." not in report_html
     assert 'type="range"' in report_html
     assert "External Source 1" in report_html
     assert (

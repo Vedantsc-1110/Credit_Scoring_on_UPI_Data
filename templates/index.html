@@ -7,12 +7,11 @@
             <p class="eyebrow">Credit Risk Intelligence</p>
             <h1>Intelligent Credit Decisions</h1>
             <p>
-                MasterMind AI combines explainability and calibrated probability
-                into a single scoring system.
+                MasterMind AI combines explainability and calibrated model output
+                into a CIBIL-style score out of 900.
             </p>
             <div class="button-row">
                 <a class="button button-primary" href="{{ url_for('analyze') }}">Analyse an Application</a>
-                <a class="button button-ghost" href="{{ url_for('status_page') }}">View System Status</a>
             </div>
         </div>
     </div>
@@ -23,7 +22,7 @@
         <div class="section-intro centered-intro">
             <h2>Built for explainable decisions</h2>
             <p>
-                Every score includes a calibrated probability, a policy
+                Every analysis includes a credit score out of 900, a policy
                 decision, and the top SHAP drivers behind that decision.
             </p>
         </div>
@@ -33,10 +32,9 @@
                 <svg viewBox="0 0 48 48" aria-hidden="true">
                     <path d="M8 34h8V18H8zm12 0h8V10h-8zm12 0h8V24h-8z"></path>
                 </svg>
-                <h3>Calibrated Probability</h3>
+                <h3>Credit Score</h3>
                 <p>
-                    Probabilities are isotonically calibrated on a held-out policy validation set, ensuring
-                    reliable probability estimates across the full [0, 1] range.
+                    The calibrated model risk is presented as a CIBIL-style score between 300 and 900.
                 </p>
             </article>
 
@@ -86,7 +84,7 @@
         <h2>Ready to score an application?</h2>
         <p>
             Choose your coverage tier, fill in the fields, and receive
-            a calibrated decision with full SHAP explanations.
+            a credit score with full SHAP explanations.
         </p>
         <a class="button button-primary button-large" href="{{ url_for('analyze') }}">Analyse an Application</a>
     </div>
@@ -97,7 +95,7 @@
         <h2>About MasterMind AI</h2>
         <p>MasterMind AI is an explainable credit scoring system built on the Home Credit Default Risk dataset.</p>
         <p>The pipeline runs through five modules: data preparation, feature engineering, model training, calibration, and a live Flask API.</p>
-        <p>Every decision from the API includes a calibrated probability of default, a policy outcome - APPROVE, REVIEW, or DECLINE - and the top five SHAP feature drivers.</p>
+        <p>Every decision from the UI presents a credit score out of 900, a policy outcome - APPROVE, REVIEW, or DECLINE - and the top five SHAP feature drivers.</p>
     </div>
 </section>
 {% endblock %}
