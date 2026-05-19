@@ -1,0 +1,179 @@
+Blockchain Layer Significance
+=============================
+
+Project:
+Decentralized AI-Based Credit Scoring System for Financial Inclusion
+
+
+1. Why Blockchain Is Used
+-------------------------
+
+The machine learning layer predicts a credit score from behavioral financial
+data such as spending patterns, bill payments, savings habits, and UPI-style
+transaction signals.
+
+That data is sensitive. It should not be stored publicly on blockchain.
+
+The blockchain layer is used for:
+
+- user identity registration
+- permission-based access control
+- tamper-proof score/application hash verification
+- immutable audit logging of credit score access
+
+So the blockchain is not replacing the ML model or the database. It adds a
+trust and verification layer around them.
+
+
+2. What Data Is Stored On-Chain
+-------------------------------
+
+The blockchain stores only minimal verification and consent data.
+
+UserRegistry.sol stores:
+
+- user wallet address
+- DID-like identifier
+- registration timestamp
+- active/inactive status
+
+AccessControl.sol stores:
+
+- user wallet address
+- requester/lender wallet address
+- permission active/inactive status
+- permission expiry timestamp
+- credit score hash
+
+AuditLog.sol stores:
+
+- requester wallet address
+- user wallet address
+- timestamp
+- access result: granted or denied
+
+
+3. What Data Is NOT Stored On-Chain
+-----------------------------------
+
+The blockchain does not store:
+
+- UPI transaction details
+- income
+- bill payment history
+- savings habits
+- raw application fields
+- personal documents
+- full credit report
+- raw ML input data
+
+Those remain in the secure off-chain database.
+
+
+4. What Privacy Is Achieved
+---------------------------
+
+The project achieves public-chain privacy.
+
+This means private financial data is not exposed on the public blockchain.
+Only hashes, permissions, and access logs are stored on-chain.
+
+Privacy benefits:
+
+1. Raw financial data is not public.
+   Anyone can inspect blockchain transactions, but they cannot read the
+   user's UPI data or application fields from the chain.
+
+2. Score/application tampering becomes detectable.
+   If the backend changes a stored score or payload later, its hash will not
+   match the hash stored on-chain.
+
+3. Access claims become verifiable.
+   If a lender claims they had permission to access a score, the permission
+   contract can prove whether permission existed and whether it had expired.
+
+4. Access history becomes transparent.
+   Every credit score access attempt can be logged as granted or denied in an
+   append-only audit trail.
+
+Important limitation:
+The current system does not hide raw data from the backend owner. The backend
+still receives and stores the raw application data. Blockchain protects against
+public exposure, hidden access claims, and undetected tampering.
+
+
+5. When ETH/Testnet Tokens Are Used
+-----------------------------------
+
+ETH or testnet tokens are used only when a blockchain transaction is sent.
+
+Tokens are used for:
+
+- deploying contracts
+- registering users on-chain
+- granting access
+- revoking access
+- storing credit score hashes
+- logging access attempts
+
+Tokens are not used for:
+
+- starting the Flask app
+- running the ML model
+- filling the application form
+- showing a score in the UI
+- normal database reads/writes
+
+In the current architecture, the backend/service wallet pays gas because
+transactions are signed using DEPLOYER_PRIVATE_KEY from the .env file.
+
+
+6. Why The Current Architecture Is Practical
+--------------------------------------------
+
+For a financial inclusion system, forcing every user to install MetaMask and
+pay gas creates friction. Many target users may be students, gig workers, or
+first-time borrowers.
+
+So the current design is:
+
+User fills application
+Backend runs ML model
+Backend stores raw data off-chain
+Backend stores hash/permission/audit records on-chain
+System wallet pays gas
+
+This gives a better user experience while still providing blockchain-based
+proof, consent, and auditability.
+
+
+7. Difference Between With Blockchain And Without Blockchain
+------------------------------------------------------------
+
+Without blockchain:
+
+- backend stores user data
+- backend controls permissions
+- backend logs access history
+- users must trust backend records completely
+
+With blockchain:
+
+- permissions are recorded in smart contracts
+- access attempts can be independently audited
+- score/application hashes provide tamper evidence
+- user identity can be linked to a wallet/DID-like record
+- important events are publicly verifiable
+
+The ML model is not made more accurate by blockchain. The improvement is in
+trust, transparency, consent, and auditability.
+
+
+8. Best Summary For Project Report
+----------------------------------
+
+The blockchain layer protects users by keeping raw financial data off-chain
+while recording consent, score hashes, and credit access logs on-chain. This
+creates a tamper-proof and publicly verifiable access-control layer around the
+AI credit scoring system without exposing sensitive UPI or financial behavior
+data on the blockchain.

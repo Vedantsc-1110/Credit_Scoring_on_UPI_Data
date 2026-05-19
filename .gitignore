@@ -34,9 +34,14 @@ data/data_quality_report.json
 # Generated artifacts
 artifacts/*
 !artifacts/.gitkeep
+blockchain-artifacts/
+blockchain-cache/
 *.joblib
 *.pkl
 *.pickle
+
+# Node / Hardhat
+node_modules/
 
 # Notebook outputs
 notebooks/eda_plots/*

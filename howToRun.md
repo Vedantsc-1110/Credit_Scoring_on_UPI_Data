@@ -1,12 +1,295 @@
-**Real Pipeline Runbook**
+# How To Run: Decentralized AI-Based Credit Scoring System
 
-Run everything from the repo root:
+This project has two main layers:
 
-```powershell
-cd C:\Users\vedan\OneDrive\Desktop\EDI1\AI_CreditScoring
+1. **ML + Flask application**
+   - Runs the credit scoring UI/API.
+   - Uses the existing FULL, REDUCED, and UPI models.
+   - Produces a CIBIL-style score out of 900.
+
+2. **Blockchain layer**
+   - Runs separately through Hardhat.
+   - Deploys smart contracts for user registry, permission-based score access, and audit logs.
+   - Stores identity, consent, hashes, and access logs on-chain.
+   - Does **not** store raw financial data on-chain.
+
+Run all commands from the repository root:
+
+```bash
+cd /Users/swanandkalekar/Desktop/AI_CreditScoring
 ```
 
-This is the real-data flow. It requires these raw files in `data\raw\`:
+---
+
+## 1. Python Environment Setup
+
+Use the project virtual environment directly. On this Mac, the repo uses `venv/`.
+
+```bash
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+If you ever recreate the environment on macOS, use Python 3.11 ARM:
+
+```bash
+arch -arm64 /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Do **not** rely on plain `flask run` or plain `pip` if they point to a different Python version. Prefer:
+
+```bash
+python -m flask --app app run
+```
+
+---
+
+## 2. Required Environment Variables
+
+Create a local `.env` file from the example:
+
+```bash
+cp .env.example .env
+```
+
+Put real secrets only in `.env`, never in `.env.example`.
+
+Minimum Flask/ML values:
+
+```env
+ARTIFACT_DIR=artifacts/
+DATA_PROCESSED_DIR=data/processed/
+DATA_RAW_DIR=data/raw/
+EDA_PLOTS_DIR=notebooks/eda_plots/
+SHAP_PLOTS_DIR=notebooks/shap_plots/
+FAIRNESS_PLOTS_DIR=notebooks/fairness_plots/
+EVAL_PLOTS_DIR=notebooks/eval_plots/
+SQLITE_DB_PATH=data/mastermind_command_center.sqlite3
+```
+
+Blockchain values for Sepolia:
+
+```env
+SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
+BLOCKCHAIN_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
+DEPLOYER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+USER_REGISTRY_ADDRESS=
+ACCESS_CONTROL_ADDRESS=
+AUDIT_LOG_ADDRESS=
+```
+
+Important:
+
+- `.env` is hidden because the filename starts with a dot.
+- `.env` is ignored by git.
+- If a private key was ever placed in `.env.example`, create a new test wallet and use the new key only in `.env`.
+
+---
+
+## 3. Run The Flask Application
+
+Start the app:
+
+```bash
+source venv/bin/activate
+python -m flask --app app run
+```
+
+Open:
+
+```text
+http://127.0.0.1:5000
+```
+
+Useful API checks:
+
+```bash
+curl http://127.0.0.1:5000/health
+```
+
+Stop the server with `Ctrl+C`.
+
+---
+
+## 4. Run Tests
+
+Run the focused API/UI tests:
+
+```bash
+python -m pytest tests/test_api.py tests/test_command_center_routes.py tests/test_command_center_smoke.py -q
+```
+
+Run the full test suite:
+
+```bash
+python -m pytest tests -q
+```
+
+---
+
+## 5. Blockchain Setup
+
+Install Node dependencies:
+
+```bash
+npm install
+```
+
+Compile contracts:
+
+```bash
+npm run compile
+```
+
+Contracts:
+
+- `contracts/UserRegistry.sol`
+- `contracts/AccessControl.sol`
+- `contracts/AuditLog.sol`
+
+Backend integration service:
+
+- `services/blockchainService.js`
+
+Hardhat build output is written to:
+
+```text
+blockchain-artifacts/
+blockchain-cache/
+```
+
+This avoids mixing blockchain build files with ML model files in `artifacts/`.
+
+---
+
+## 6. Deploy Blockchain Locally
+
+Use local deployment for quick testing:
+
+```bash
+npm run deploy:local
+```
+
+This deploys to Hardhat's temporary in-memory chain. The printed addresses are not permanent.
+
+Example output:
+
+```text
+UserRegistry deployed to: 0x...
+AccessControl deployed to: 0x...
+AuditLog deployed to: 0x...
+```
+
+Do not use local Hardhat addresses for long-term `.env` configuration because they reset every run.
+
+---
+
+## 7. Deploy Blockchain To Sepolia
+
+Before deploying, make sure `.env` contains:
+
+```env
+SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
+BLOCKCHAIN_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
+DEPLOYER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+```
+
+The deployer wallet must have Sepolia test ETH.
+
+Deploy:
+
+```bash
+npm run deploy:sepolia
+```
+
+After deployment, copy the printed addresses into `.env`:
+
+```env
+USER_REGISTRY_ADDRESS=0x...
+ACCESS_CONTROL_ADDRESS=0x...
+AUDIT_LOG_ADDRESS=0x...
+```
+
+Then the backend blockchain service can connect to those deployed contracts.
+
+---
+
+## 8. Deploy Blockchain To Polygon Amoy
+
+Mumbai is deprecated. Use Polygon Amoy for current Polygon testnet work.
+
+In `.env`:
+
+```env
+AMOY_RPC_URL=https://polygon-amoy.g.alchemy.com/v2/YOUR_KEY
+BLOCKCHAIN_RPC_URL=https://polygon-amoy.g.alchemy.com/v2/YOUR_KEY
+DEPLOYER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY
+```
+
+Deploy:
+
+```bash
+npm run deploy:amoy
+```
+
+Copy the printed contract addresses into `.env`.
+
+---
+
+## 9. What Uses ETH?
+
+ETH/testnet tokens are used only when a blockchain transaction is sent.
+
+ETH is used for:
+
+- Deploying contracts with `npm run deploy:sepolia`
+- Registering a user on-chain
+- Granting/revoking access
+- Storing a score hash
+- Logging an access event
+
+ETH is **not** used for:
+
+- Starting Flask
+- Running the ML model
+- Filling a form
+- Viewing the score result
+
+In the current architecture, blockchain transactions are backend/service-wallet controlled. That means the deployer/backend wallet pays gas for blockchain actions.
+
+---
+
+## 10. Current Blockchain Integration Status
+
+Implemented:
+
+- Smart contracts
+- Hardhat config
+- Deployment scripts
+- Ethers.js service module
+- `.env` variables
+
+Not yet wired into the Flask UI flow:
+
+- Automatic user registration when a user submits an application
+- Automatic score hash storage after ML scoring
+- Automatic permission checks before showing score to a third party
+- Automatic audit logging for score access
+- MetaMask wallet popups
+
+This is intentional for now because the request was to add the blockchain layer without changing the ML pipeline or frontend.
+
+---
+
+## 11. Optional: Run The Full Offline ML Pipeline
+
+Only run this if you need to regenerate model/data artifacts. It requires raw datasets in `data/raw/`.
+
+Required raw files:
 
 - `application_train.csv`
 - `application_test.csv`
@@ -18,350 +301,78 @@ This is the real-data flow. It requires these raw files in `data\raw\`:
 - `credit_card_balance.csv`
 - `final_base_with_upi_corrected.csv` for the standalone UPI model
 
-Use `venv\Scripts\python.exe` directly so you do not get blocked by PowerShell activation policy.
+Run:
+
+```bash
+python -m src.data_pipeline
+python -m src.feature_engineering
+python -m src.models.train
+python -m src.models.upi
+python -m src.fairness_audit
+```
+
+Skip `src.models.upi` if you only want the original FULL/REDUCED artifacts.
+
+Expected important artifacts:
+
+- `artifacts/full_feature_builder.joblib`
+- `artifacts/full_model.joblib`
+- `artifacts/full_calibrator.joblib`
+- `artifacts/reduced_feature_builder.joblib`
+- `artifacts/reduced_model.joblib`
+- `artifacts/reduced_calibrator.joblib`
+- `artifacts/upi_feature_builder.joblib`
+- `artifacts/upi_model.joblib`
+- `artifacts/upi_calibrator.joblib`
+- `artifacts/model_fairness_audit_passed.joblib`
 
 ---
 
-**1. One-Time Setup**
+## 12. Troubleshooting
 
-```powershell
-python -m venv venv
-venv\Scripts\python.exe -m pip install --upgrade pip
-venv\Scripts\python.exe -m pip install -r requirements.txt
+### `ModuleNotFoundError: No module named 'seaborn'`
+
+You are probably using the wrong Python interpreter.
+
+Use:
+
+```bash
+source venv/bin/activate
+python -m pip install -r requirements.txt
+python -m flask --app app run
 ```
 
-Set the repo paths for this terminal session:
+### `Error HH100: Network sepolia doesn't exist`
 
-```powershell
-$env:DATA_RAW_DIR = "data/raw/"
-$env:DATA_PROCESSED_DIR = "data/processed/"
-$env:ARTIFACT_DIR = "artifacts/"
-$env:EDA_PLOTS_DIR = "notebooks/eda_plots/"
-$env:SHAP_PLOTS_DIR = "notebooks/shap_plots/"
-$env:FAIRNESS_PLOTS_DIR = "notebooks/fairness_plots/"
-$env:EVAL_PLOTS_DIR = "notebooks/eval_plots/"
+Use the updated `hardhat.config.js`. Then ensure `.env` has:
+
+```env
+SEPOLIA_RPC_URL=...
+DEPLOYER_PRIVATE_KEY=...
 ```
 
----
+### `SEPOLIA_RPC_URL is required`
 
-**2. Run The Offline Pipeline**
+Your `.env` is missing the Sepolia RPC URL or Hardhat cannot read it.
 
-**Module 1: data processing**
+Check:
 
-```powershell
-venv\Scripts\python.exe -m src.data_pipeline
+```bash
+ls -la .env
 ```
 
-Check the outputs:
+### MetaMask Does Not Pop Up
 
-```powershell
-Get-ChildItem data\processed
-Get-Content data\processed\processed_artifact_manifest.json | Select-Object -First 40
-Get-Item data\data_quality_report.json
-Get-ChildItem notebooks\eda_plots
+This is expected.
+
+The current blockchain layer uses backend/Hardhat signing through `DEPLOYER_PRIVATE_KEY`. MetaMask popups only happen if the frontend is changed to use `window.ethereum`, which is not part of the current integration.
+
+### `npm audit` shows vulnerabilities
+
+Hardhat projects commonly show dependency audit warnings. For a local academic prototype, do not blindly run force fixes. Use:
+
+```bash
+npm audit
 ```
 
-You should see at least:
-
-- `train.pkl`
-- `val_model.pkl`
-- `val_policy.pkl`
-- `test.pkl`
-- `app_test_adv.pkl`
-- `income_cap.joblib`
-- `processed_artifact_manifest.json`
-
-**Module 2: feature builders**
-
-```powershell
-venv\Scripts\python.exe -m src.feature_engineering
-```
-
-Check that both builders load cleanly:
-
-```powershell
-@'
-from src.builder_artifacts import load_validated_builders
-builders = load_validated_builders(
-    artifact_dir="artifacts",
-    processed_dir="data/processed",
-    strict_artifacts=True,
-)
-print("FULL", builders["FULL"].tier, len(builders["FULL"].encoded_columns_))
-print("REDUCED", builders["REDUCED"].tier, len(builders["REDUCED"].encoded_columns_))
-'@ | venv\Scripts\python.exe -
-```
-
-**Module 3: training + reproducibility**
-
-```powershell
-venv\Scripts\python.exe -m src.models.train
-```
-
-Check the training outputs:
-
-```powershell
-Get-ChildItem artifacts
-@'
-import json
-with open("artifacts/reproducibility_report.json", "r", encoding="utf-8") as f:
-    r = json.load(f)
-print("full_model_version:", r["full_model_version"])
-print("full_model_family:", r["tiers"]["FULL"]["model_family"])
-print("full_selected_candidate:", r["tiers"]["FULL"]["selection"]["candidate"])
-print("reduced_model_version:", r["reduced_model_version"])
-print("processed_manifest_fingerprint:", r["processed_manifest_fingerprint"])
-'@ | venv\Scripts\python.exe -
-```
-
-Expected current truth:
-
-- FULL version: `full_weighted_blend_v2.2.0`
-- FULL family: `weighted_blend`
-- FULL selected candidate: `weighted_blend_full`
-- REDUCED version: `reduced_v2.1.0`
-
-**Module 3B: standalone UPI model**
-
-This trains the new UPI model from:
-
-```text
-data\raw\final_base_with_upi_corrected.csv
-```
-
-It does not overwrite the existing FULL or REDUCED artifacts. It creates a separate UPI artifact set.
-
-```powershell
-venv\Scripts\python.exe -m src.models.upi
-```
-
-Useful options:
-
-```powershell
-venv\Scripts\python.exe -m src.models.upi --help
-venv\Scripts\python.exe -m src.models.upi --sample-rows 1000 --artifact-dir artifacts\upi_smoke
-venv\Scripts\python.exe -m src.models.upi --dataset-path data\raw\final_base_with_upi_corrected.csv --artifact-dir artifacts\
-```
-
-Expected UPI outputs:
-
-- `artifacts\upi_feature_builder.joblib`
-- `artifacts\upi_model.joblib`
-- `artifacts\upi_calibrator.joblib`
-- `artifacts\upi_shap_explainer.joblib`
-- `artifacts\upi_training_report.json`
-
-Check the UPI report:
-
-```powershell
-@'
-import json
-with open("artifacts/upi_training_report.json", "r", encoding="utf-8") as f:
-    r = json.load(f)
-print("upi_model_version:", r["model_version"])
-print("feature_count:", r["feature_count"])
-print("roc_auc:", r["metrics"]["roc_auc"])
-print("auc_pr:", r["metrics"]["auc_pr"])
-print("brier_score:", r["metrics"]["brier_score"])
-print("default_rate:", r["metrics"]["default_rate"])
-'@ | venv\Scripts\python.exe -
-```
-
-Score a few rows from the UPI CSV directly:
-
-```powershell
-@'
-import pandas as pd
-from src.models.upi import score_upi_frame
-
-df = pd.read_csv("data/raw/final_base_with_upi_corrected.csv", nrows=5)
-print(score_upi_frame(df).to_string(index=False))
-'@ | venv\Scripts\python.exe -
-```
-
-Important UPI modeling notes:
-
-- The current UPI flow uses internal feature engineering plus XGBoost `scale_pos_weight` for class imbalance.
-- It does not currently write SMOTE-resampled files into `data\processed`.
-- It drops `SK_ID_CURR`, `TARGET`, `SK_ID_PREV`, and known empty source columns before modeling.
-- It converts `DAYS_EMPLOYED = 365243` into a `DAYS_EMPLOYED_ANOM` flag and removes that value as a real duration.
-- It treats `XNA` as `Unknown`.
-- If UPI metrics are extremely high, especially ROC-AUC near `0.99`, treat that as a leakage warning. Check whether UPI features were generated from `TARGET`, include post-default behavior, or were created with target-aware synthetic logic.
-
-**Module 4: fairness audit + explainability/eval plots**
-
-```powershell
-venv\Scripts\python.exe -m src.fairness_audit
-```
-
-Check the outputs:
-
-```powershell
-@'
-import joblib
-print("fairness_audit_passed:", joblib.load("artifacts/model_fairness_audit_passed.joblib"))
-'@ | venv\Scripts\python.exe -
-
-Get-ChildItem notebooks\fairness_plots
-Get-ChildItem notebooks\shap_plots
-Get-ChildItem notebooks\eval_plots
-```
-
-Expected current state in this repo: fairness still ends up `False`.
-
----
-
-**3. Start The API And Score Requests**
-
-Open a second PowerShell window in the repo root and set the same env vars:
-
-```powershell
-cd C:\Users\vedan\OneDrive\Desktop\EDI1\AI_CreditScoring
-$env:DATA_RAW_DIR = "data/raw/"
-$env:DATA_PROCESSED_DIR = "data/processed/"
-$env:ARTIFACT_DIR = "artifacts/"
-$env:EDA_PLOTS_DIR = "notebooks/eda_plots/"
-$env:SHAP_PLOTS_DIR = "notebooks/shap_plots/"
-$env:FAIRNESS_PLOTS_DIR = "notebooks/fairness_plots/"
-$env:EVAL_PLOTS_DIR = "notebooks/eval_plots/"
-```
-
-Start the real API:
-
-```powershell
-venv\Scripts\python.exe -c "from src.api.app import create_app; app = create_app(artifact_dir='artifacts', processed_dir='data/processed', mock_mode=False, strict_artifacts=True); app.run(host='127.0.0.1', port=5000)"
-```
-
-In a third terminal, check health:
-
-```powershell
-Invoke-RestMethod -Uri http://127.0.0.1:5000/health -Method Get
-```
-
-Generate one valid REDUCED payload and one valid FULL payload:
-
-```powershell
-@'
-import json
-from src.api import AGG_REQUIRED_FIELDS
-
-application = {
-    "AMT_INCOME_TOTAL_CAPPED": 120000.0,
-    "AMT_CREDIT": 250000.0,
-    "AMT_ANNUITY": 25000.0,
-    "AMT_GOODS_PRICE": 220000.0,
-    "DAYS_BIRTH": -12000.0,
-    "DAYS_EMPLOYED": -1500.0,
-    "DAYS_REGISTRATION": -3000.0,
-    "DAYS_ID_PUBLISH": -2000.0,
-    "DAYS_LAST_PHONE_CHANGE": -1000.0,
-    "REGION_POPULATION_RELATIVE": 0.02,
-    "EXT_SOURCE_1": 0.2,
-    "EXT_SOURCE_2": 0.4,
-    "EXT_SOURCE_3": 0.6,
-    "CNT_FAM_MEMBERS": 2.0,
-    "OWN_CAR_AGE": 5.0,
-    "OBS_30_CNT_SOCIAL_CIRCLE": 1.0,
-    "DEF_30_CNT_SOCIAL_CIRCLE": 0.0,
-    "OBS_60_CNT_SOCIAL_CIRCLE": 1.0,
-    "DEF_60_CNT_SOCIAL_CIRCLE": 0.0,
-    "AMT_REQ_CREDIT_BUREAU_HOUR": 0.0,
-    "AMT_REQ_CREDIT_BUREAU_DAY": 0.0,
-    "AMT_REQ_CREDIT_BUREAU_WEEK": 1.0,
-    "AMT_REQ_CREDIT_BUREAU_MON": 1.0,
-    "AMT_REQ_CREDIT_BUREAU_QRT": 0.0,
-    "AMT_REQ_CREDIT_BUREAU_YEAR": 1.0,
-    "NAME_CONTRACT_TYPE": "Cash loans",
-    "NAME_TYPE_SUITE": "Unaccompanied",
-    "NAME_EDUCATION_TYPE": "Higher education",
-    "NAME_FAMILY_STATUS": "Married",
-    "OCCUPATION_TYPE": "Laborers",
-    "ORGANIZATION_TYPE": "Business Entity Type 3",
-    "WEEKDAY_APPR_PROCESS_START": "MONDAY",
-    "DAYS_EMPLOYED_ANOM": 0
-}
-
-reduced_payload = {"application": application}
-full_payload = {"application": application}
-for section_name, fields in AGG_REQUIRED_FIELDS.items():
-    full_payload[section_name] = {
-        field: float(index + 1) for index, field in enumerate(fields)
-    }
-
-with open("reduced_payload.json", "w", encoding="utf-8") as f:
-    json.dump(reduced_payload, f, indent=2)
-
-with open("full_payload.json", "w", encoding="utf-8") as f:
-    json.dump(full_payload, f, indent=2)
-
-print("Wrote reduced_payload.json and full_payload.json")
-'@ | venv\Scripts\python.exe -
-```
-
-Score REDUCED:
-
-```powershell
-Invoke-RestMethod -Uri http://127.0.0.1:5000/score -Method Post -ContentType "application/json" -InFile reduced_payload.json
-```
-
-Score FULL:
-
-```powershell
-Invoke-RestMethod -Uri http://127.0.0.1:5000/score -Method Post -ContentType "application/json" -InFile full_payload.json
-```
-
-What you should see:
-
-- `/health` returns `status: ok`
-- `/health.model_version` is `full_weighted_blend_v2.2.0`
-- REDUCED `/score` returns `coverage_tier: REDUCED`
-- FULL `/score` returns `coverage_tier: FULL`
-- REDUCED version is `reduced_v2.1.0`
-- FULL version is `full_weighted_blend_v2.2.0`
-
-Stop the API with `Ctrl+C`.
-
----
-
-**4. Full Test Commands**
-
-Run the full suite:
-
-```powershell
-venv\Scripts\python.exe -m pytest tests -q
-```
-
-Useful targeted runs:
-
-```powershell
-venv\Scripts\python.exe -m pytest tests/test_api.py -q
-venv\Scripts\python.exe -m pytest tests/test_m2_m4_integration.py -q
-venv\Scripts\python.exe -m pytest tests/test_m3_blending.py -q
-venv\Scripts\python.exe -m pytest tests/test_subgroup_calibration.py -q
-```
-
----
-
-**5. Minimal End-To-End Sequence**
-
-If you just want the shortest real pipeline command chain:
-
-```powershell
-cd C:\Users\vedan\OneDrive\Desktop\EDI1\AI_CreditScoring
-$env:DATA_RAW_DIR = "data/raw/"
-$env:DATA_PROCESSED_DIR = "data/processed/"
-$env:ARTIFACT_DIR = "artifacts/"
-$env:EDA_PLOTS_DIR = "notebooks/eda_plots/"
-$env:SHAP_PLOTS_DIR = "notebooks/shap_plots/"
-$env:FAIRNESS_PLOTS_DIR = "notebooks/fairness_plots/"
-$env:EVAL_PLOTS_DIR = "notebooks/eval_plots/"
-
-venv\Scripts\python.exe -m src.data_pipeline
-venv\Scripts\python.exe -m src.feature_engineering
-venv\Scripts\python.exe -m src.models.train
-venv\Scripts\python.exe -m src.models.upi
-venv\Scripts\python.exe -m src.fairness_audit
-venv\Scripts\python.exe -m pytest tests -q
-```
-
-The `src.models.upi` command is standalone. Skip it if you only want the original FULL/REDUCED pipeline.
+and review before changing versions.
