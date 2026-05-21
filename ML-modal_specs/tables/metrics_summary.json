@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-05-20T23:48:51",
+  "source_report": "artifacts\\reproducibility_report.json",
+  "evaluation_mode": "synthetic",
+  "decision_threshold": 0.35,
+  "metrics": [
+    {
+      "model": "FULL",
+      "model_family": "xgboost",
+      "model_version": "full_v2.1.0",
+      "feature_count": 114,
+      "threshold": 0.35,
+      "accuracy": 0.73125,
+      "auc_roc": 0.7498629881411863,
+      "brier_score": 0.17382551050465397,
+      "default_rate": 0.7015625,
+      "tn": 27,
+      "fp": 164,
+      "fn": 8,
+      "tp": 441
+    },
+    {
+      "model": "REDUCED",
+      "model_family": "xgboost",
+      "model_version": "reduced_v2.1.0",
+      "feature_count": 69,
+      "threshold": 0.35,
+      "accuracy": 0.7046875,
+      "auc_roc": 0.6913851607411466,
+      "brier_score": 0.1884401494868995,
+      "default_rate": 0.7015625,
+      "tn": 3,
+      "fp": 188,
+      "fn": 1,
+      "tp": 448
+    }
+  ]
+}
